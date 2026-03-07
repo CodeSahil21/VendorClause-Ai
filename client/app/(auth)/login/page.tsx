@@ -47,7 +47,7 @@ export default function LoginPage() {
     try {
       await login(formData);
       toast.success('Logged in successfully!');
-      router.push('/');
+      router.push('/home');
     } catch (err) {
       toast.error((err as Error).message || 'Login failed');
     }
@@ -65,10 +65,10 @@ export default function LoginPage() {
         <div className="relative z-10 animate-slideIn">
           <div className="flex items-center space-x-3 mb-8">
             <div className="relative">
-              <Image src="/APP.png" alt="PolyGot" width={50} height={50} className="rounded-full ring-4 ring-white/30" />
+              <Image src="/APP.png" alt="VendorClause AI" width={50} height={50} className="rounded-full ring-4 ring-white/30" />
               <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-400 rounded-full border-2 border-white"></div>
             </div>
-            <span className="text-3xl font-bold text-white">PolyGot</span>
+            <span className="text-3xl font-bold text-white">VendorClause AI</span>
           </div>
           <h1 className="text-5xl font-bold text-white mb-4 leading-tight">AI-Powered Vendor Service Agreements</h1>
           <p className="text-xl text-indigo-100">Streamline your vendor management with intelligent automation</p>
@@ -104,13 +104,13 @@ export default function LoginPage() {
       <div className="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-12">
         <div className="w-full max-w-md space-y-8">
           <div className="text-center lg:hidden">
-            <Image src="/APP.png" alt="PolyGot" width={60} height={60} className="mx-auto rounded-full mb-4 ring-4 ring-indigo-100" />
+            <Image src="/APP.png" alt="VendorClause AI" width={60} height={60} className="mx-auto rounded-full mb-4 ring-4 ring-indigo-100" />
             <h2 className="text-3xl font-bold text-gray-900">Welcome back</h2>
             <p className="mt-2 text-sm text-gray-600">Sign in to your account</p>
           </div>
           <div className="hidden lg:block">
             <h2 className="text-4xl font-bold text-gray-900 mb-2">Welcome back</h2>
-            <p className="text-gray-600">Sign in to continue to PolyGot</p>
+            <p className="text-gray-600">Sign in to continue to VendorClause AI</p>
           </div>
 
           <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
@@ -223,7 +223,7 @@ export default function LoginPage() {
               <div className="w-full border-t border-gray-300"></div>
             </div>
             <div className="relative flex justify-center text-sm">
-              <span className="px-4 bg-white text-gray-500">New to PolyGot?</span>
+              <span className="px-4 bg-white text-gray-500">New to VendorClause AI?</span>
             </div>
           </div>
 

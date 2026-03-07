@@ -50,7 +50,7 @@ export default function RegisterPage() {
     try {
       await register(formData);
       toast.success('Account created successfully!');
-      router.push('/');
+      router.push('/home');
     } catch (err) {
       toast.error((err as Error).message || 'Registration failed');
     }
@@ -67,10 +67,10 @@ export default function RegisterPage() {
         <div className="relative z-10 animate-slideIn">
           <div className="flex items-center space-x-3 mb-8">
             <div className="relative">
-              <Image src="/APP.png" alt="PolyGot" width={50} height={50} className="rounded-full ring-4 ring-white/30" />
+              <Image src="/APP.png" alt="VendorClause AI" width={50} height={50} className="rounded-full ring-4 ring-white/30" />
               <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-400 rounded-full border-2 border-white"></div>
             </div>
-            <span className="text-3xl font-bold text-white">PolyGot</span>
+            <span className="text-3xl font-bold text-white">VendorClause AI</span>
           </div>
           <h1 className="text-5xl font-bold text-white mb-4 leading-tight">Start Your Journey</h1>
           <p className="text-xl text-pink-100">Join thousands of businesses automating their vendor agreements</p>
@@ -105,9 +105,9 @@ export default function RegisterPage() {
       <div className="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-12">
         <div className="w-full max-w-md space-y-8">
           <div className="text-center lg:hidden">
-            <Image src="/APP.png" alt="PolyGot" width={60} height={60} className="mx-auto rounded-full mb-4 ring-4 ring-purple-100" />
+            <Image src="/APP.png" alt="VendorClause AI" width={60} height={60} className="mx-auto rounded-full mb-4 ring-4 ring-purple-100" />
             <h2 className="text-3xl font-bold text-gray-900">Create account</h2>
-            <p className="mt-2 text-sm text-gray-600">Get started with PolyGot</p>
+            <p className="mt-2 text-sm text-gray-600">Get started with VendorClause AI</p>
           </div>
           <div className="hidden lg:block">
             <h2 className="text-4xl font-bold text-gray-900 mb-2">Create account</h2>
