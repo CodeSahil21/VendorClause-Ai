@@ -1,0 +1,115 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  
+  sessions     ChatSession[]
+  documents    Document[]
+}
+
+
+model ChatSession {
+  id          String     @id @default(uuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  documents   Document[]
+  messages    Message[]
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Document {
+  id          String       @id @default(uuid())
+  sessionId   String
+  session     ChatSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  fileName    String
+  s3Url       String
+  status      DocStatus    @default(PENDING)
+  createdAt   DateTime     @default(now())
+  
+  jobs        Job[]
+
+  @@index([sessionId])
+  @@index([userId])
+  @@index([status])
+}
+
+enum DocStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+
+model Job {
+  id          String     @id @default(uuid())
+  documentId  String
+  document    Document   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  
+  taskType    TaskType   @default(FULL_INGESTION)
+  status      JobStatus  @default(QUEUED)
+  error       String?    @db.Text
+  
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime   @default(now())
+
+  @@index([documentId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum TaskType {
+  FULL_INGESTION
+  GRAPH_EXTRACTION
+  REPORT_GENERATION
+}
+
+enum JobStatus {
+  QUEUED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+
+model Message {
+  id          String       @id @default(uuid())
+  sessionId   String
+  session     ChatSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  role        Role
+  content     String       @db.Text
+  tokensUsed  Int?
+  
+  createdAt   DateTime     @default(now())
+
+  @@index([sessionId])
+  @@index([createdAt])
+}
+
+enum Role {
+  USER
+  AI
+  SYSTEM
+}
