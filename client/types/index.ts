@@ -12,3 +12,12 @@ export type {
   ApiErrorResponse,
   ApiSuccessResponse,
 } from './auth.types';
+
+export type {
+  Session,
+  CreateSessionDto,
+  UpdateSessionDto,
+  SessionResponse,
+  SessionsListResponse,
+  DeleteSessionResponse,
+} from './session.types';
