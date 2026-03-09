@@ -1,1 +1,66 @@
+# Dependencies
+node_modules/
+venv/
+venv-ai/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+.next/
+out/
+build/
+dist/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Models (large files)
+ai-service/models/
+!ai-service/models/.gitkeep
+
+# Temporary files
+*.tmp
+*.temp
+progress.json
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+coverage/
+.nyc_output/
+
+# Prisma
+Gateway/prisma/migrations/
+
+# Documentation and config (EXCLUDE from git)
 *.md
+*.yml
+*.yaml

@@ -22,6 +22,11 @@ export interface DocumentResponse {
   createdAt: Date;
 }
 
+export interface DocumentUploadResponse {
+  document: DocumentResponse;
+  job: JobResponse;
+}
+
 export interface DocumentWithJobs extends DocumentResponse {
   jobs: JobResponse[];
 }

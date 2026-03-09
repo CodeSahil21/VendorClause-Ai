@@ -1,16 +1,17 @@
 import { prisma } from '../lib/prisma';
 import { minioClient, BUCKET_NAME } from '../lib/minio';
 import { ApiError } from '../utils/apiError';
-import { DocumentResponse, DocumentWithJobs } from '../types/session.types';
+import { DocumentUploadResponse, DocumentWithJobs } from '../types/session.types';
 import { CacheService } from '../lib/cache';
 import { v4 as uuidv4 } from 'uuid';
+import { getQueue } from '../lib/queue';
 
 export class DocumentService {
   static async uploadDocument(
     userId: string,
     sessionId: string,
     file: Express.Multer.File
-  ): Promise<DocumentResponse> {
+  ): Promise<DocumentUploadResponse> {
     const session = await prisma.chatSession.findFirst({
       where: { id: sessionId, userId }
     });
@@ -38,7 +39,7 @@ export class DocumentService {
       }
     });
 
-    await prisma.job.create({
+    const job = await prisma.job.create({
       data: {
         documentId: document.id,
         taskType: 'FULL_INGESTION',
@@ -46,9 +47,17 @@ export class DocumentService {
       }
     });
 
+    // Push job to Redis queue for Python worker
+    await getQueue().add('process-document', {
+      jobId: job.id,
+      documentId: document.id,
+      userId,
+      pdfUrl: s3Url
+    });
+
     CacheService.invalidateSessionWithDocuments(userId, sessionId).catch(console.error);
 
-    return document;
+    return { document, job };
   }
 
   static async getDocumentById(documentId: string, userId: string): Promise<DocumentWithJobs> {

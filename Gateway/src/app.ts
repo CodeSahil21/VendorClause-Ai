@@ -10,6 +10,7 @@ import { prisma } from './lib/prisma';
 import authRoutes from './routes/auth.routes';
 import sessionRoutes from './routes/session.routes';
 import documentRoutes from './routes/document.routes';
+import jobRoutes from './routes/job.routes';
 
 const app: Application = express();
 
@@ -55,6 +56,7 @@ app.get('/health', async (_req: Request, res: Response) => {
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/sessions', sessionRoutes);
 app.use('/api/v1/documents', documentRoutes);
+app.use('/api/v1/jobs', jobRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

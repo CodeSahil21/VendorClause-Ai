@@ -1,15 +1,19 @@
+import { createServer } from 'http';
 import app from './app';
 import { env } from './config';
 import { connectDb, disconnectDb } from './lib/prisma';
 import { connectRedis, redis } from './lib/redis';
 import { validateMinioConnection, ensureBucket } from './lib/minio';
+import { initQueue, closeQueue } from './lib/queue';
+import { setupSocketIO, closeSocketIO } from './lib/socket';
 
 async function startServer() {
   try {
     await Promise.all([
       connectDb(),
       connectRedis(),
-      validateMinioConnection()
+      validateMinioConnection(),
+      initQueue()
     ]);
     
     // Ensure MinIO bucket exists
@@ -17,7 +21,10 @@ async function startServer() {
     
     console.log('✅ All services connected');
 
-    const server = app.listen(env.PORT, () => {
+    const httpServer = createServer(app);
+    setupSocketIO(httpServer);
+
+    const server = httpServer.listen(env.PORT, '0.0.0.0', () => {
       console.log(`
 🚀 Gateway API
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -26,6 +33,9 @@ async function startServer() {
 ❤️  Health:      http://localhost:${env.PORT}/health
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       `);
+    }).on('error', (err: any) => {
+      console.error('❌ Server failed to start:', err);
+      process.exit(1);
     });
 
     const gracefulShutdown = async (signal: string) => {
@@ -35,7 +45,9 @@ async function startServer() {
           await Promise.race([
             Promise.all([
               disconnectDb(),
-              redis.isReady ? redis.disconnect() : Promise.resolve()
+              redis.isReady ? redis.disconnect() : Promise.resolve(),
+              closeQueue(),
+              closeSocketIO()
             ]),
             new Promise((_, reject) => 
               setTimeout(() => reject(new Error('Shutdown timeout')), 5000)

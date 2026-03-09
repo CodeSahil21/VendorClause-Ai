@@ -11,7 +11,7 @@ export const uploadDocument = asyncHandler(async (req: Request, res: Response) =
 
   // sessionId is already validated by UploadDocumentSchema in the route
   const result = await DocumentService.uploadDocument(req.user!.id, req.body.sessionId, req.file);
-  res.status(201).json(new ApiResponse(201, result, 'Document uploaded'));
+  res.status(202).json(new ApiResponse(202, result, 'Document queued for processing'));
 });
 
 export const getDocument = asyncHandler(async (req: Request, res: Response) => {
