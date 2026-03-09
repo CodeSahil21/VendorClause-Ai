@@ -49,24 +49,24 @@ class LegalRAGIngestion:
             },
             encode_kwargs={
                 'normalize_embeddings': True,
-                'batch_size': 16
+                'batch_size': 32
             },
             cache_folder="./models"
         )
         
         # Sparse embeddings (BM25-like)
-        self.sparse_model = SparseTextEmbedding(model_name="prithvida/Splade_PP_en_v1")
+        self.sparse_model = SparseTextEmbedding(model_name="prithivida/Splade_PP_en_v1")
         
-        # Knowledge Graph schema
+        # Knowledge Graph schema - improved legal structure
         self.graph_transformer = LLMGraphTransformer(
             llm=self.llm,
             allowed_nodes=[
-                "Party", "Contract", "Clause", "Obligation", "Liability",
-                "PaymentTerm", "Termination", "Confidentiality", "ServiceLevel"
+                "Party", "Clause", "Obligation", "Right", "Payment",
+                "Service", "TerminationCondition", "Liability", "ConfidentialInformation"
             ],
             allowed_relationships=[
-                "HAS_CLAUSE", "OWES_OBLIGATION", "LIMITS_LIABILITY",
-                "TERMINATES", "PAYS", "PROVIDES_SERVICE"
+                "HAS_CLAUSE", "HAS_OBLIGATION", "OWES_PAYMENT",
+                "PROVIDES_SERVICE", "CAN_TERMINATE", "LIMITS_LIABILITY"
             ],
             strict_mode=True
         )
@@ -100,8 +100,8 @@ class LegalRAGIngestion:
         # Convert to unsigned 64-bit integer using hash
         return abs(hash(id_string)) % (2**63)
     
-    async def parse_pdf(self, file_path: str) -> tuple[str, dict]:
-        """Parse PDF with LlamaParse and extract page metadata"""
+    async def parse_pdf(self, file_path: str) -> str:
+        """Parse PDF with LlamaParse - combines all pages"""
         logger.info("📄 Parsing PDF")
         self.progress.update("processing", stage="Parsing PDF", progress=10)
         
@@ -117,21 +117,17 @@ class LegalRAGIngestion:
         docs = await asyncio.to_thread(parser.load_data, file_path)
         
         if not docs:
-            return "", {}
+            raise ValueError("No text extracted")
         
-        markdown = docs[0].text
+        # FIX: Combine ALL pages, not just first page
+        markdown = "\n\n".join(doc.text for doc in docs)
         
         if not markdown.strip():
             raise ValueError("PDF parsing returned empty text")
         
-        # Extract page mapping if available
-        page_metadata = {}
-        if hasattr(docs[0], 'metadata') and 'page' in docs[0].metadata:
-            page_metadata = docs[0].metadata
-        
-        return markdown, page_metadata
+        return markdown
     
-    def chunk_document(self, markdown_text: str, document_id: str, page_metadata: dict = None) -> List[Document]:
+    def chunk_document(self, markdown_text: str, document_id: str) -> List[Document]:
         """Universal legal chunking with multi-pattern clause detection"""
         logger.info("🔪 Universal clause detection")
         self.progress.update("processing", document_id, stage="Chunking", progress=30)
@@ -166,7 +162,7 @@ class LegalRAGIngestion:
             
             chunks.append(doc)
         
-        # Recursive split for long clauses (preserves parent metadata)
+        # Recursive split for long clauses
         recursive_splitter = RecursiveCharacterTextSplitter(
             chunk_size=800,
             chunk_overlap=120
@@ -174,9 +170,15 @@ class LegalRAGIngestion:
         
         final_chunks = recursive_splitter.split_documents(chunks)
         
-        # Inherit page number from parent section after recursive split
+        # Re-extract metadata from child chunks and inherit page number
         for idx, chunk in enumerate(final_chunks):
+            # Re-extract metadata from chunk text to fix mismatches
+            new_meta = self.extract_clause_metadata(chunk.page_content)
+            if new_meta:
+                chunk.metadata.update(new_meta)
+            
             chunk.metadata['chunk_index'] = idx
+            
             # Ensure page_number is inherited from parent
             if '_original_page' in chunk.metadata:
                 chunk.metadata['page_number'] = chunk.metadata['_original_page']
@@ -189,6 +191,7 @@ class LegalRAGIngestion:
         """Split text by legal section markers using finditer"""
         import re
         LEGAL_SECTION_PATTERN = r"""^(
+            \d+\.\s+[A-Z][A-Z\s]+|     # 2. COMPENSATION AND PAYMENT
             \d+(\.\d+)*[.:\s]+|        # 1, 1.1, 2., 2:
             \d+\)\s+|                   # 1), 2)
             §\d+|                       # §2, §15
@@ -225,8 +228,8 @@ class LegalRAGIngestion:
         """Extract page break positions from markdown"""
         import re
         page_map = {}
-        # LlamaParse often adds page markers like '---\nPage 2\n---'
-        pattern = r'(?:---|Page\s+)(\d+)(?:---|\n)'
+        # Enhanced pattern to catch various LlamaParse page formats
+        pattern = r'(?:Page\s*:?|\-\-\-\s*Page)\s*(\d+)'
         for match in re.finditer(pattern, text, re.IGNORECASE):
             page_num = int(match.group(1))
             page_map[match.start()] = page_num
@@ -256,13 +259,13 @@ class LegalRAGIngestion:
         import re
         metadata = {}
         
-        # Match various clause patterns (improved for ALL CAPS and edge cases)
+        # Match various clause patterns (improved for ALL CAPS and mixed case)
         patterns = [
             (r'^\s*(\d+(\.\d+)*)[.:\s]+([A-Z][A-Z\s;,\-]{3,120})', 'numbered_caps'),
-            (r'^\s*(\d+(\.\d+)*)[.:\s]+([A-Za-z][^\n]{3,80})', 'numbered'),
-            (r'^§(\d+)[.:\s]+([A-Za-z][^\n]{3,80})', 'section_symbol'),
-            (r'^Section\s+(\d+)[:\s]+([A-Za-z][^\n]{3,80})', 'section'),
-            (r'^Article\s+([IVX]+)[:\s]+([A-Za-z][^\n]{3,80})', 'article'),
+            (r'^\s*(\d+(\.\d+)*)[.:\s]+([A-Za-z][^\n]{3,120})', 'numbered'),
+            (r'^§(\d+)[.:\s]+([A-Za-z][^\n]{3,120})', 'section_symbol'),
+            (r'^Section\s+(\d+)[:\s]+([A-Za-z][^\n]{3,120})', 'section'),
+            (r'^Article\s+([IVX]+)[:\s]+([A-Za-z][^\n]{3,120})', 'article'),
         ]
         
         for pattern, clause_type in patterns:
@@ -279,10 +282,19 @@ class LegalRAGIngestion:
                 elif clause_type == 'section':
                     metadata['section'] = match.group(1)
                     metadata['clause_title'] = match.group(2).strip()
+                    metadata['clause_path'] = f"Section_{match.group(1)}"
                 elif clause_type == 'article':
                     metadata['article'] = match.group(1)
                     metadata['clause_title'] = match.group(2).strip()
+                    metadata['clause_path'] = f"Article_{match.group(1)}"
                 break
+        
+        # FIX: Better fallback for clause_path using hash to prevent collisions
+        if 'clause_path' not in metadata:
+            if 'clause_title' in metadata:
+                metadata['clause_path'] = f"{metadata['clause_title'][:20]}_{abs(hash(text[:50])) % 10000}"
+            else:
+                metadata['clause_path'] = f"section_{abs(hash(text[:50])) % 10000}"
         
         # Classify clause type (content-aware for vague titles)
         if 'clause_title' in metadata:
@@ -333,9 +345,11 @@ class LegalRAGIngestion:
         """Filter out legal boilerplate entities with normalization"""
         import re
         IGNORE_ENTITIES = {
-            'agreement', 'herein', 'thereof', 'receipt', 'party', 'parties',
-            'sufficiency', 'consideration', 'witness', 'whereof', 'hereby',
-            'hereunder', 'therein', 'thereto', 'foregoing', 'aforesaid'
+            'agreement', 'service', 'services', 'contract', 'contracts',
+            'party', 'parties', 'terms', 'conditions', 'herein', 'thereof',
+            'receipt', 'sufficiency', 'consideration', 'witness', 'whereof',
+            'hereby', 'hereunder', 'therein', 'thereto', 'foregoing', 'aforesaid',
+            'work', 'works'
         }
         
         filtered = []
@@ -353,17 +367,29 @@ class LegalRAGIngestion:
         logger.info("🕸️  Extracting legal knowledge graph")
         self.progress.update("processing", stage="Extracting Graph", progress=50)
         
-        BATCH_SIZE = 6  # Optimized for token limits
+        BATCH_SIZE = 6
         graph_docs = []
         
         for i in range(0, len(chunks), BATCH_SIZE):
             batch = chunks[i:i+BATCH_SIZE]
             result = await self.graph_transformer.aconvert_to_graph_documents(batch)
             
-            # Filter boilerplate entities from each graph doc
+            # Filter boilerplate entities and clean relationships
             for graph_doc in result:
                 if hasattr(graph_doc, 'nodes'):
-                    graph_doc.nodes = self.filter_legal_entities(graph_doc.nodes)
+                    # Filter nodes
+                    original_nodes = graph_doc.nodes
+                    graph_doc.nodes = self.filter_legal_entities(original_nodes)
+                    
+                    # Get valid node IDs
+                    valid_node_ids = {node.id for node in graph_doc.nodes}
+                    
+                    # Filter relationships referencing removed nodes
+                    if hasattr(graph_doc, 'relationships'):
+                        graph_doc.relationships = [
+                            rel for rel in graph_doc.relationships
+                            if rel.source.id in valid_node_ids and rel.target.id in valid_node_ids
+                        ]
             
             graph_docs.extend(result)
             logger.info(f"✅ Processed batch {i//BATCH_SIZE + 1}/{(len(chunks)-1)//BATCH_SIZE + 1}")
@@ -453,8 +479,8 @@ class LegalRAGIngestion:
             
             await self.init_db()
             
-            markdown, page_metadata = await self.parse_pdf(file_path)
-            chunks = self.chunk_document(markdown, document_id, page_metadata)
+            markdown = await self.parse_pdf(file_path)
+            chunks = self.chunk_document(markdown, document_id)
             
             # Extract and store graph
             graph_docs = await self.extract_graph(chunks)

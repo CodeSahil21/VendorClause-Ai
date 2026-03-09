@@ -8,6 +8,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Whitelist for relationship types to prevent injection
+ALLOWED_REL_TYPES = {
+    "HAS_CLAUSE", "HAS_OBLIGATION", "OWES_PAYMENT",
+    "PROVIDES_SERVICE", "CAN_TERMINATE", "LIMITS_LIABILITY"
+}
+
 class Neo4jService:
     def __init__(self):
         self.driver = AsyncGraphDatabase.driver(
@@ -65,7 +71,7 @@ class Neo4jService:
                     )
                     stored_nodes += 1
                 
-                # Store relationships with validation
+                # Store relationships with validation and dynamic relationship types
                 for rel in graph_doc.relationships:
                     # Skip if relationship is invalid
                     if not rel.source or not rel.target:
@@ -76,17 +82,26 @@ class Neo4jService:
                     normalized_source = self.normalize_entity(rel.source.id)
                     normalized_target = self.normalize_entity(rel.target.id)
                     
+                    # FIX: Use dynamic relationship types with whitelist validation
+                    rel_type = rel.type.upper().replace(" ", "_")
+                    
+                    # Validate against whitelist to prevent injection
+                    if rel_type not in ALLOWED_REL_TYPES:
+                        rel_type = "RELATES"
+                    
+                    # Build dynamic query (Neo4j requires this for dynamic rel types)
+                    query = f"""
+                    MATCH (source:Entity {{id: $source_id}})
+                    MATCH (target:Entity {{id: $target_id}})
+                    MERGE (source)-[r:{rel_type}]->(target)
+                    SET r.document_id = $document_id,
+                        r.confidence = $confidence
+                    """
+                    
                     await session.run(
-                        """
-                        MATCH (source:Entity {id: $source_id})
-                        MATCH (target:Entity {id: $target_id})
-                        MERGE (source)-[r:RELATES {type: $rel_type}]->(target)
-                        SET r.document_id = $document_id,
-                            r.confidence = $confidence
-                        """,
+                        query,
                         source_id=normalized_source,
                         target_id=normalized_target,
-                        rel_type=rel.type,
                         document_id=document_id,
                         confidence=0.8
                     )
