@@ -5,7 +5,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
-from src.settings import settings
+from src.shared.settings import settings
 import logging
 
 logger = logging.getLogger(__name__)

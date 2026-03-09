@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 
 # Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from llama_parse import LlamaParse
 from langchain_ollama import OllamaLLM
@@ -18,10 +18,10 @@ from langchain_experimental.text_splitter import SemanticChunker
 from langchain_core.documents import Document
 from fastembed import SparseTextEmbedding
 from qdrant_client import AsyncQdrantClient, models
-from src.settings import settings
-from src.neo4j_service import Neo4jService
-from src.database_service import DatabaseService
-from src.progress_tracker import ProgressTracker
+from src.shared.settings import settings
+from src.shared.neo4j_service import Neo4jService
+from src.shared.database_service import DatabaseService
+from src.shared.progress_tracker import ProgressTracker
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("LEGAL_RAG_PIPELINE")

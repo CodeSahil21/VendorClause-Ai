@@ -5,12 +5,12 @@ import sys
 from pathlib import Path
 
 # Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from redis import Redis
-from src.settings import settings
-from src.ingestion_service import LegalRAGIngestion
-from src.database_service import DatabaseService
+from src.shared.settings import settings
+from src.ingestion.ingestion_service import LegalRAGIngestion
+from src.shared.database_service import DatabaseService
 import boto3
 import tempfile
 import os

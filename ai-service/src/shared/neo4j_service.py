@@ -3,7 +3,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from neo4j import AsyncGraphDatabase
-from src.settings import settings
+from src.shared.settings import settings
 import logging
 
 logger = logging.getLogger(__name__)
