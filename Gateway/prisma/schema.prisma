@@ -27,7 +27,7 @@ model ChatSession {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   
-  documents   Document[]
+  document    Document?
   messages    Message[]
 
   @@index([userId])
@@ -36,7 +36,7 @@ model ChatSession {
 
 model Document {
   id          String       @id @default(uuid())
-  sessionId   String
+  sessionId   String       @unique
   session     ChatSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   userId      String
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -48,7 +48,6 @@ model Document {
   
   jobs        Job[]
 
-  @@index([sessionId])
   @@index([userId])
   @@index([status])
 }

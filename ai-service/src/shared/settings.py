@@ -21,11 +21,19 @@ class Settings(BaseSettings):
     
     # Qdrant
     qdrant_url: str = "http://localhost:6333"
+
+    # Ollama
+    ollama_url: str = "http://localhost:11434"
     
     # Neo4j
     neo4j_uri: str
     neo4j_user: str
     neo4j_password: str
+    
+    # Langfuse
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_host: str = "http://localhost:3040"
     
     class Config:
         env_file = ".env"

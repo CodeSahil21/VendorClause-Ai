@@ -1,4 +1,3 @@
-import os
 import hashlib
 import asyncio
 import logging
@@ -20,8 +19,8 @@ from fastembed import SparseTextEmbedding
 from qdrant_client import AsyncQdrantClient, models
 from src.shared.settings import settings
 from src.shared.neo4j_service import Neo4jService
-from src.shared.database_service import DatabaseService
 from src.shared.progress_tracker import ProgressTracker
+from src.shared.langfuse_config import trace_ingestion
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("LEGAL_RAG_PIPELINE")
@@ -34,7 +33,7 @@ class LegalRAGIngestion:
         # Local LLM via Ollama (Qwen2.5-7B-Instruct)
         self.llm = OllamaLLM(
             model="qwen2.5:7b-instruct-q4_K_M",
-            base_url="http://localhost:11434", 
+            base_url=settings.ollama_url,
             temperature=0,
             num_ctx=16384,  # Optimized for graph extraction
             num_predict=512,
@@ -51,7 +50,7 @@ class LegalRAGIngestion:
                 'normalize_embeddings': True,
                 'batch_size': 32
             },
-            cache_folder="./models"
+            cache_folder=str(Path(__file__).parent.parent.parent / "models")
         )
         
         # Sparse embeddings (BM25-like)
@@ -95,11 +94,12 @@ class LegalRAGIngestion:
             logger.info("✅ Qdrant hybrid collection created")
     
     def generate_id(self, document_id: str, clause_path: str, chunk_index: int) -> int:
-        """Generate unique integer ID for Qdrant (hash-based)"""
+        """Generate deterministic unique integer ID for Qdrant (hashlib-based)"""
         id_string = f"{document_id}_{clause_path}_{chunk_index}"
-        # Convert to unsigned 64-bit integer using hash
-        return abs(hash(id_string)) % (2**63)
+        hash_bytes = hashlib.sha256(id_string.encode()).digest()
+        return int.from_bytes(hash_bytes[:8], 'big') % (2**63)
     
+    @trace_ingestion(name="parse_pdf")
     async def parse_pdf(self, file_path: str) -> str:
         """Parse PDF with LlamaParse - combines all pages"""
         logger.info("📄 Parsing PDF")
@@ -127,6 +127,7 @@ class LegalRAGIngestion:
         
         return markdown
     
+    @trace_ingestion(name="chunk_document")
     def chunk_document(self, markdown_text: str, document_id: str) -> List[Document]:
         """Universal legal chunking with multi-pattern clause detection"""
         logger.info("🔪 Universal clause detection")
@@ -172,11 +173,13 @@ class LegalRAGIngestion:
         
         # Re-extract metadata from child chunks and inherit page number
         for idx, chunk in enumerate(final_chunks):
-            # Re-extract metadata from chunk text to fix mismatches
+            # Only override parent metadata if child chunk starts with a real clause header
             new_meta = self.extract_clause_metadata(chunk.page_content)
-            if new_meta:
+            if new_meta.get('clause_number') or new_meta.get('section') or new_meta.get('article'):
+                # Child chunk has its own clause header — use its metadata
                 chunk.metadata.update(new_meta)
-            
+            # Otherwise keep parent's inherited metadata (which is correct)
+
             chunk.metadata['chunk_index'] = idx
             
             # Ensure page_number is inherited from parent
@@ -289,12 +292,13 @@ class LegalRAGIngestion:
                     metadata['clause_path'] = f"Article_{match.group(1)}"
                 break
         
-        # FIX: Better fallback for clause_path using hash to prevent collisions
+        # FIX: Deterministic fallback for clause_path using hashlib
         if 'clause_path' not in metadata:
+            text_hash = int(hashlib.sha256(text[:50].encode()).hexdigest(), 16) % 10000
             if 'clause_title' in metadata:
-                metadata['clause_path'] = f"{metadata['clause_title'][:20]}_{abs(hash(text[:50])) % 10000}"
+                metadata['clause_path'] = f"{metadata['clause_title'][:20]}_{text_hash}"
             else:
-                metadata['clause_path'] = f"section_{abs(hash(text[:50])) % 10000}"
+                metadata['clause_path'] = f"section_{text_hash}"
         
         # Classify clause type (content-aware for vague titles)
         if 'clause_title' in metadata:
@@ -362,6 +366,7 @@ class LegalRAGIngestion:
         
         return filtered
     
+    @trace_ingestion(name="extract_graph")
     async def extract_graph(self, chunks: List[Document]):
         """Extract knowledge graph with batching and entity filtering"""
         logger.info("🕸️  Extracting legal knowledge graph")
@@ -397,6 +402,7 @@ class LegalRAGIngestion:
         logger.info(f"✅ {len(graph_docs)} graph docs extracted")
         return graph_docs
     
+    @trace_ingestion(name="store_graph_to_neo4j")
     async def store_graph_to_neo4j(self, graph_docs, document_id: str):
         """Store graph in Neo4j"""
         logger.info("💾 Storing graph in Neo4j")
@@ -409,6 +415,7 @@ class LegalRAGIngestion:
         
         logger.info("✅ Graph stored in Neo4j")
     
+    @trace_ingestion(name="index_chunks")
     async def index_chunks(self, chunks: List[Document]):
         """Index with dual vectors and batching"""
         logger.info(f"🔢 Generating embeddings for {len(chunks)} chunks")
@@ -418,7 +425,7 @@ class LegalRAGIngestion:
         
         # Parallelize embedding generation
         dense_task = asyncio.to_thread(self.embedding_model.embed_documents, texts)
-        sparse_task = asyncio.to_thread(lambda: list(self.sparse_model.embed(texts)))
+        sparse_task = asyncio.to_thread(lambda: list(self.sparse_model.embed(texts, batch_size=8)))
         
         dense_vectors, sparse_vectors = await asyncio.gather(dense_task, sparse_task)
         
@@ -464,43 +471,31 @@ class LegalRAGIngestion:
         with open(file_path, "rb") as f:
             return hashlib.md5(f.read()).hexdigest()
     
+    @trace_ingestion(name="process_document")
     async def process_document(self, file_path: str, document_id: str, job_id: str = None):
-        """Full pipeline with job tracking"""
-        db = DatabaseService() if job_id else None
-        
+        """Full pipeline - status updates handled by the worker, not here"""
         try:
             # Generate document hash for deduplication
             doc_hash = self.generate_doc_hash(file_path)
             logger.info(f"🔑 Document hash: {doc_hash}")
-            
-            if db and job_id:
-                db.update_job_status(job_id, "IN_PROGRESS")
-                db.update_document_status(document_id, "PROCESSING")
-            
+
             await self.init_db()
-            
+
             markdown = await self.parse_pdf(file_path)
             chunks = self.chunk_document(markdown, document_id)
-            
+
             # Extract and store graph
             graph_docs = await self.extract_graph(chunks)
             await self.store_graph_to_neo4j(graph_docs, document_id)
-            
+
             # Index to Qdrant
             await self.index_chunks(chunks)
-            
-            if db and job_id:
-                db.update_document_status(document_id, "READY")
-                db.update_job_status(job_id, "COMPLETED")
-            
+
             logger.info("✅ Document ingestion complete")
             self.progress.update("completed", document_id, progress=100, stage="Done")
             return chunks
-            
+
         except Exception as e:
-            if db and job_id:
-                db.update_job_status(job_id, "FAILED", str(e))
-                db.update_document_status(document_id, "FAILED")
             logger.error(f"❌ Ingestion failed: {str(e)}")
             self.progress.update("failed", document_id, stage=f"Error: {str(e)}")
             raise

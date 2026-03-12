@@ -42,6 +42,7 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_BROWSER_REDIRECT_URL: http://localhost:9001
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
@@ -94,6 +95,26 @@ services:
       - ollama_data:/root/.ollama
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:11434']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  langfuse:
+    image: ghcr.io/langfuse/langfuse:2
+    container_name: gateway_langfuse
+    restart: unless-stopped
+    ports:
+      - '3040:3000'
+    environment:
+      DATABASE_URL: postgresql://gateway_user:gateway_secure_pass_2024@postgres:5432/langfuse_db
+      NEXTAUTH_SECRET: your-nextauth-secret-change-me
+      NEXTAUTH_URL: http://localhost:3040
+      SALT: your-salt-change-me
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/api/health']
       interval: 10s
       timeout: 5s
       retries: 5

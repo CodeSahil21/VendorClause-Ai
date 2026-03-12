@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  reactStrictMode: false,
+  images: {
+    unoptimized: true,
+  },
   async rewrites() {
     return [
       {

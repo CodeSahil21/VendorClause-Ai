@@ -45,8 +45,13 @@ export class SessionService {
     const session = await prisma.chatSession.findFirst({
       where: { id: sessionId, userId },
       include: {
-        documents: {
-          orderBy: { createdAt: 'desc' }
+        document: {
+          include: {
+            jobs: {
+              orderBy: { createdAt: 'desc' },
+              take: 1
+            }
+          }
         }
       }
     });
@@ -55,7 +60,15 @@ export class SessionService {
       throw new ApiError(404, 'Session not found');
     }
 
-    CacheService.setSessionWithDocuments(userId, sessionId, session, 300).catch(console.error);
+    // Only cache sessions with documents in terminal states (READY/FAILED) or no document
+    // Don't cache PENDING/PROCESSING - polling needs fresh DB reads for status transitions
+    const isTransitional = session.document &&
+      (session.document.status === 'PENDING' || session.document.status === 'PROCESSING');
+
+    if (!isTransitional) {
+      CacheService.setSessionWithDocuments(userId, sessionId, session, 300).catch(console.error);
+    }
+    
     return session;
   }
 

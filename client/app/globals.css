@@ -19,7 +19,14 @@
   }
 }
 
+html {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
+  height: 100%;
+  overflow: hidden;
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
@@ -34,8 +41,9 @@ input::placeholder {
   color: #9ca3af !important;
 }
 
-/* Smooth scrolling */
-html {
+/* Smooth scrolling for scrollable elements */
+.overflow-auto,
+.overflow-y-auto {
   scroll-behavior: smooth;
 }
 

@@ -13,11 +13,16 @@ export class DocumentService {
     file: Express.Multer.File
   ): Promise<DocumentUploadResponse> {
     const session = await prisma.chatSession.findFirst({
-      where: { id: sessionId, userId }
+      where: { id: sessionId, userId },
+      include: { document: true }
     });
 
     if (!session) {
       throw new ApiError(404, 'Session not found');
+    }
+
+    if (session.document) {
+      throw new ApiError(400, 'Session already has a document. Only one document per session is allowed.');
     }
 
     const fileExtension = file.originalname.split('.').pop()?.toLowerCase() || 'bin';
@@ -55,7 +60,7 @@ export class DocumentService {
       pdfUrl: s3Url
     });
 
-    CacheService.invalidateSessionWithDocuments(userId, sessionId).catch(console.error);
+    CacheService.invalidateSessionCache(userId, sessionId).catch(console.error);
 
     return { document, job };
   }
@@ -98,6 +103,6 @@ export class DocumentService {
     });
 
     CacheService.invalidateDocument(userId, documentId).catch(console.error);
-    CacheService.invalidateSessionWithDocuments(userId, document.sessionId).catch(console.error);
+    CacheService.invalidateSessionCache(userId, document.sessionId).catch(console.error);
   }
 }

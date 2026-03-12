@@ -1,11 +1,12 @@
 # Core Framework
 fastapi==0.115.0
 uvicorn[standard]==0.32.0
-pydantic==2.8.2
-pydantic-settings==2.4.0
+pydantic==2.12.5
+pydantic-settings==2.13.1
 
 # Queue & Database
-redis==5.2.0
+bullmq==2.19.6
+redis==6.4.0
 psycopg2-binary==2.9.10
 sqlalchemy==2.0.35
 
@@ -14,9 +15,9 @@ boto3==1.35.0
 
 # langchain-openai==0.2.8
 sentence-transformers==3.3.1
-langchain>=0.3.7
-langchain-community>=0.3.5
-langchain-experimental>=0.3.3
+langchain==1.2.10
+langchain-community==0.4.1
+langchain-experimental==0.4.1
 langchain-ollama==1.0.1
 langchain-huggingface==1.2.1
 
@@ -28,14 +29,17 @@ qdrant-client==1.12.0
 
 # Knowledge Graph
 neo4j==5.26.0
-langchain-neo4j>=0.2.0
+langchain-neo4j==0.8.0
 json-repair==0.58.5
 
 # Sparse Embeddings
 fastembed==0.7.4
 
 # Text Processing
-langchain-text-splitters>=0.3.2
+langchain-text-splitters==1.1.1
+
+# Observability
+langfuse==2.60.10
 
 # Utilities
 python-dotenv==1.0.1

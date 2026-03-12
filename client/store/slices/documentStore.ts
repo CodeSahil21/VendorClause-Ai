@@ -33,6 +33,7 @@ interface DocumentState {
   isUploading: boolean;
   isLoading: boolean;
   error: string | null;
+  currentJobId: string | null;
 }
 
 interface DocumentStore extends DocumentState {
@@ -41,6 +42,7 @@ interface DocumentStore extends DocumentState {
   deleteDocument: (documentId: string) => Promise<void>;
   clearError: () => void;
   resetUpload: () => void;
+  setCurrentJobId: (jobId: string | null) => void;
 }
 
 export const useDocumentStore = create<DocumentStore>()((set) => ({
@@ -50,6 +52,7 @@ export const useDocumentStore = create<DocumentStore>()((set) => ({
   isUploading: false,
   isLoading: false,
   error: null,
+  currentJobId: null,
 
   uploadDocument: async (sessionId, file) => {
     set({ isUploading: true, uploadProgress: 0, error: null });
@@ -92,4 +95,6 @@ export const useDocumentStore = create<DocumentStore>()((set) => ({
   clearError: () => set({ error: null }),
   
   resetUpload: () => set({ uploadProgress: 0, isUploading: false, error: null }),
+  
+  setCurrentJobId: (jobId) => set({ currentJobId: jobId }),
 }));

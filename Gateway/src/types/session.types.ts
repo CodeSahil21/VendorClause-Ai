@@ -9,7 +9,7 @@ export interface SessionResponse {
 }
 
 export interface SessionWithDocuments extends SessionResponse {
-  documents: DocumentResponse[];
+  document: DocumentResponse | null;
 }
 
 export interface DocumentResponse {
@@ -20,6 +20,7 @@ export interface DocumentResponse {
   s3Url: string;
   status: DocStatus;
   createdAt: Date;
+  jobs?: JobResponse[];
 }
 
 export interface DocumentUploadResponse {

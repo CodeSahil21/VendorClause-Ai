@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { useSocket } from '@/context/SocketContext';
 
 interface JobStatusData {
   jobId: string;
@@ -10,48 +10,46 @@ interface JobStatusData {
 }
 
 export function useJobStatus(jobId: string | null) {
+  const { socket } = useSocket();
   const [status, setStatus] = useState<JobStatusData['status']>('QUEUED');
+  const [documentId, setDocumentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [socket, setSocket] = useState<Socket | null>(null);
 
   useEffect(() => {
-    if (!jobId) return;
+    if (!jobId?.trim() || !socket) return;
 
-    const socketUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-    const newSocket = io(socketUrl, {
-      withCredentials: true
-    });
+    // Join the job room (socket may already be connected)
+    if (socket.connected) {
+      socket.emit('join', jobId);
+    }
 
-    newSocket.on('connect', () => {
-      console.log('✅ Socket connected:', newSocket.id);
-      newSocket.emit('join', jobId);
-    });
+    // Re-join on reconnect
+    const handleConnect = () => socket.emit('join', jobId);
 
-    newSocket.on('job:status', (data: JobStatusData) => {
-      console.log('📢 Job status update:', data);
+    const handleJobStatus = (data: JobStatusData) => {
+      if (data.jobId !== jobId) return;
       setStatus(data.status);
-      if (data.error) {
-        setError(data.error);
-      }
-    });
+      if (data.documentId) setDocumentId(data.documentId);
+      if (data.error) setError(data.error);
+    };
 
-    newSocket.on('disconnect', () => {
-      console.log('🔌 Socket disconnected');
-    });
+    const handleComplete = (data: { documentId: string; jobId: string }) => {
+      if (data.jobId !== jobId) return;
+      setStatus('COMPLETED');
+      setDocumentId(data.documentId);
+    };
 
-    newSocket.on('connect_error', (err) => {
-      console.error('❌ Socket connection error:', err);
-    });
-
-    setSocket(newSocket);
+    socket.on('connect', handleConnect);
+    socket.on('job:status', handleJobStatus);
+    socket.on('ingestion:complete', handleComplete);
 
     return () => {
-      if (newSocket) {
-        newSocket.emit('leave', jobId);
-        newSocket.disconnect();
-      }
+      socket.emit('leave', jobId);
+      socket.off('connect', handleConnect);
+      socket.off('job:status', handleJobStatus);
+      socket.off('ingestion:complete', handleComplete);
     };
-  }, [jobId]);
+  }, [jobId, socket]);
 
-  return { status, error, socket };
+  return { status, documentId, error };
 }

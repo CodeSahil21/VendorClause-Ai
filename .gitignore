@@ -41,6 +41,7 @@ ai-service/models/
 *.tmp
 *.temp
 progress.json
+cors.json
 
 # OS
 Thumbs.db

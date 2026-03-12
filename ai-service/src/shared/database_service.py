@@ -4,7 +4,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime
+from datetime import datetime, timezone
 from src.shared.settings import settings
 import logging
 
@@ -32,7 +32,7 @@ class DatabaseService:
                     """)
                     session.execute(query, {
                         "status": status,
-                        "started_at": datetime.utcnow(),
+                        "started_at": datetime.now(timezone.utc),
                         "job_id": job_id
                     })
                 
@@ -44,7 +44,7 @@ class DatabaseService:
                     """)
                     session.execute(query, {
                         "status": status,
-                        "completed_at": datetime.utcnow(),
+                        "completed_at": datetime.now(timezone.utc),
                         "job_id": job_id
                     })
                 
@@ -57,7 +57,7 @@ class DatabaseService:
                     session.execute(query, {
                         "status": status,
                         "error": error,
-                        "completed_at": datetime.utcnow(),
+                        "completed_at": datetime.now(timezone.utc),
                         "job_id": job_id
                     })
                 

@@ -7,7 +7,7 @@ from src.ingestion.ingestion_worker import IngestionWorker
 
 async def main():
     worker = IngestionWorker()
-    await worker.listen()
+    await worker.run()
 
 if __name__ == "__main__":
     asyncio.run(main())

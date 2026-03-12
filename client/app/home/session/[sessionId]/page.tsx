@@ -1,49 +1,72 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import { useSessionStore, useDocumentStore } from '@/store';
-import { Upload, FileText, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import UploadDocument from '@/components/UploadDocument';
+import ProcessingDocument from '@/components/ProcessingDocument';
+import ChatDocument from '@/components/ChatDocument';
 
 export default function SessionPage() {
   const params = useParams();
   const sessionId = params.sessionId as string;
   const { currentSession, isLoading, getSessionById } = useSessionStore();
-  const { uploadDocument, isUploading, error, clearError } = useDocumentStore();
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadSuccess, setUploadSuccess] = useState(false);
+  const { setCurrentJobId } = useDocumentStore();
+  const [currentJobId, setLocalJobId] = useState<string | null>(null);
+  const [processingError, setProcessingError] = useState<string | null>(null);
+
+  // Derive the active jobId: use local state (from upload) or recover from session data (on revisit)
+  const activeJobId = useMemo(() => {
+    if (currentJobId) return currentJobId;
+    // Recover jobId from session's document jobs (latest non-completed job)
+    const jobs = currentSession?.document?.jobs;
+    if (jobs && jobs.length > 0) {
+      const activeJob = jobs.find(j => j.status === 'QUEUED' || j.status === 'IN_PROGRESS');
+      if (activeJob) return activeJob.id;
+    }
+    return null;
+  }, [currentJobId, currentSession?.document?.jobs]);
 
   useEffect(() => {
     if (sessionId) {
-      getSessionById(sessionId);
+      getSessionById(sessionId).catch(() => {});
     }
   }, [sessionId, getSessionById]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setSelectedFile(file);
-      setUploadSuccess(false);
-      clearError();
-    }
-  };
+  // Poll for status updates while document is in a transitional state (fallback if Socket.IO misses events)
+  useEffect(() => {
+    const docStatus = currentSession?.document?.status;
+    const isTransitional = docStatus === 'PENDING' || docStatus === 'PROCESSING' || !!currentJobId;
+    if (!isTransitional) return;
 
-  const handleUpload = async () => {
-    if (!selectedFile || !sessionId) return;
+    const interval = setInterval(() => {
+      getSessionById(sessionId).catch(() => {});
+    }, 3000);
 
-    try {
-      await uploadDocument(sessionId, selectedFile);
-      setUploadSuccess(true);
-      setSelectedFile(null);
-      // Reset file input
-      const fileInput = document.getElementById('file-upload') as HTMLInputElement;
-      if (fileInput) fileInput.value = '';
-    } catch (err) {
-      console.error('Upload failed:', err);
-    }
-  };
+    return () => clearInterval(interval);
+  }, [sessionId, currentSession?.document?.status, currentJobId, getSessionById]);
 
-  if (isLoading) {
+  const handleUploadStart = useCallback((jobId: string) => {
+    setLocalJobId(jobId);
+    setCurrentJobId(jobId);
+    // Re-fetch session to get the new document with PENDING status
+    getSessionById(sessionId).catch(() => {});
+  }, [setCurrentJobId, sessionId, getSessionById]);
+
+  const handleProcessingComplete = useCallback((documentId: string) => {
+    setLocalJobId(null);
+    getSessionById(sessionId).catch(() => {});
+  }, [sessionId, getSessionById]);
+
+  const handleProcessingError = useCallback((err: string) => {
+    setLocalJobId(null);
+    setProcessingError(err);
+    // Re-fetch to get FAILED status from server
+    getSessionById(sessionId).catch(() => {});
+  }, [sessionId, getSessionById]);
+
+  // Only show full-screen spinner on initial load (not during polling)
+  if (isLoading && !currentSession) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
@@ -62,83 +85,59 @@ export default function SessionPage() {
     );
   }
 
-  return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">{currentSession.title}</h1>
-        <p className="text-gray-600">
-          Created on {new Date(currentSession.createdAt).toLocaleDateString('en-US', {
-            month: 'long',
-            day: 'numeric',
-            year: 'numeric'
-          })}
-        </p>
+  // Show chat if document is ready
+  if (currentSession.document?.status === 'READY') {
+    return (
+      <ChatDocument
+        documentId={currentSession.document.id}
+        fileName={currentSession.document.fileName}
+        s3Url={currentSession.document.s3Url}
+      />
+    );
+  }
 
-        {/* Upload Section */}
-        <div className="mt-8 border-t pt-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Upload Document</h2>
-          
-          <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-indigo-500 transition-colors">
-            <Upload className="mx-auto h-12 w-12 text-gray-400" />
-            <div className="mt-4">
-              <label htmlFor="file-upload" className="cursor-pointer">
-                <span className="mt-2 block text-sm font-medium text-gray-900">
-                  {selectedFile ? selectedFile.name : 'Click to upload or drag and drop'}
-                </span>
-                <span className="mt-1 block text-xs text-gray-500">
-                  PDF or DOCX up to 50MB
-                </span>
-                <input
-                  id="file-upload"
-                  type="file"
-                  className="hidden"
-                  accept=".pdf,.docx"
-                  onChange={handleFileChange}
-                  disabled={isUploading}
-                />
-              </label>
-            </div>
+  // Show processing if document is PENDING, PROCESSING, or we just started an upload (currentJobId set)
+  if (currentSession.document?.status === 'PROCESSING' || currentSession.document?.status === 'PENDING' || currentJobId) {
+    return (
+      <ProcessingDocument
+        jobId={activeJobId || ''}
+        onComplete={handleProcessingComplete}
+        onError={handleProcessingError}
+      />
+    );
+  }
 
-            {selectedFile && (
-              <div className="mt-4 flex items-center justify-center gap-2">
-                <FileText className="h-5 w-5 text-indigo-600" />
-                <span className="text-sm text-gray-700">{selectedFile.name}</span>
-                <span className="text-xs text-gray-500">({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)</span>
-              </div>
-            )}
-
-            {selectedFile && !isUploading && (
-              <button
-                onClick={handleUpload}
-                className="mt-4 px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-              >
-                Upload Document
-              </button>
-            )}
-
-            {isUploading && (
-              <div className="mt-4 flex items-center justify-center gap-2 text-indigo-600">
-                <Loader2 className="h-5 w-5 animate-spin" />
-                <span className="text-sm font-medium">Uploading...</span>
-              </div>
-            )}
-
-            {uploadSuccess && (
-              <div className="mt-4 flex items-center justify-center gap-2 text-green-600">
-                <CheckCircle className="h-5 w-5" />
-                <span className="text-sm font-medium">Document uploaded successfully!</span>
-              </div>
-            )}
-
-            {error && (
-              <div className="mt-4 flex items-center justify-center gap-2 text-red-600">
-                <XCircle className="h-5 w-5" />
-                <span className="text-sm font-medium">{error}</span>
-              </div>
-            )}
+  // Show error if document failed
+  if (currentSession.document?.status === 'FAILED' || processingError) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="text-center">
+            <div className="text-6xl mb-4">❌</div>
+            <h2 className="text-2xl font-bold text-gray-900">Document Processing Failed</h2>
+            <p className="mt-2 text-gray-600">
+              {processingError || 'There was an error processing your document. Please try uploading again.'}
+            </p>
+            <button
+              onClick={() => {
+                setProcessingError(null);
+                getSessionById(sessionId).catch(() => {});
+              }}
+              className="mt-6 px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            >
+              Try Again
+            </button>
           </div>
         </div>
       </div>
-    </div>
+    );
+  }
+
+  // Show upload form (no document)
+  return (
+    <UploadDocument
+      sessionId={sessionId}
+      onUploadStart={handleUploadStart}
+    />
   );
 }

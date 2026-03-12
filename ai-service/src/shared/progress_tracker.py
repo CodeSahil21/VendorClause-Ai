@@ -14,8 +14,11 @@ class ProgressTracker:
             "stage": stage,
             "updated_at": datetime.now().isoformat()
         }
-        with open(self.file_path, "w") as f:
-            json.dump(data, f, indent=2)
+        try:
+            with open(self.file_path, "w") as f:
+                json.dump(data, f, indent=2)
+        except OSError:
+            pass  # Don't crash the pipeline for progress file writes
     
     def get(self):
         try:
