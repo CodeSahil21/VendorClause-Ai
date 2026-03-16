@@ -119,7 +119,6 @@ class LegalRAGIngestion:
         if not docs:
             raise ValueError("No text extracted")
         
-        # FIX: Combine ALL pages, not just first page
         markdown = "\n\n".join(doc.text for doc in docs)
         
         if not markdown.strip():
