@@ -89,3 +89,17 @@ class DatabaseService:
                 session.rollback()
                 logger.error(f"❌ Failed to update document status: {str(e)}")
                 raise
+
+    def get_job_status(self, job_id: str) -> str | None:
+        """Get the current status of a job for idempotency checks"""
+        with self.SessionLocal() as session:
+            try:
+                result = session.execute(
+                    text('SELECT status FROM "Job" WHERE id = :id'),
+                    {"id": job_id}
+                )
+                row = result.fetchone()
+                return row[0] if row else None
+            except Exception as e:
+                logger.error(f"❌ Failed to get job status: {str(e)}")
+                return None

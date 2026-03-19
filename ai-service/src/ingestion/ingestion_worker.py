@@ -62,6 +62,12 @@ class IngestionWorker:
             logger.error(f"Missing required job data fields: jobId={job_id}, documentId={document_id}, pdfUrl={pdf_url}")
             return
 
+        # Idempotency guard: skip if already processed or in progress
+        current_status = self.db.get_job_status(job_id)
+        if current_status in ("COMPLETED", "IN_PROGRESS"):
+            logger.warning(f"Job {job_id} is already {current_status}, skipping duplicate execution")
+            return
+
         logger.info(f"Processing job {job_id} for document {document_id}")
 
         try:
@@ -103,7 +109,8 @@ class IngestionWorker:
             self.db.update_document_status(document_id, "FAILED")
             self.notify_status(job_id, "FAILED", documentId=document_id, error=error_msg)
 
-            raise
+            # Don't re-raise — we've already handled the failure above.
+            # Re-raising would tell BullMQ to retry, causing duplicate execution.
 
     def notify_status(self, job_id: str, status: str, **extra):
         """Publish job status to Redis for Socket.IO"""
