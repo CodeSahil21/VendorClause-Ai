@@ -1,58 +1,30 @@
-# =============================
-# LEGAL RAG INGESTION PIPELINE (FULL FEATURE + NVIDIA SAFE FINAL)
-# =============================
-
-import hashlib
 import asyncio
+import hashlib
 import logging
 import re
-from pathlib import Path
 import sys
+from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__)
-.parent.parent.parent))
-
-from llama_parse import LlamaParse
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_experimental.graph_transformers import LLMGraphTransformer
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from fastembed import SparseTextEmbedding
+from langchain_core.documents import Document
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_experimental.graph_transformers import LLMGraphTransformer
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_openai import ChatOpenAI
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from llama_parse import LlamaParse
 from qdrant_client import AsyncQdrantClient, models
 
-from src.shared.settings import settings
+from src.shared.langfuse_config import get_langfuse_handler, trace_ingestion
 from src.shared.neo4j_service import Neo4jService
 from src.shared.progress_tracker import ProgressTracker
-from src.shared.langfuse_config import trace_ingestion
+from src.shared.settings import settings
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("LEGAL_RAG_PIPELINE")
+logger = logging.getLogger(__name__)
 
-
-class LegalRAGIngestion:
-
-    def __init__(self):
-
-        self.progress = ProgressTracker()
-
-        # 🔥 NVIDIA LLM (SAFE CONFIG)
-        self.llm = ChatOpenAI(
-            openai_api_base="https://integrate.api.nvidia.com/v1",
-            openai_api_key=settings.nvidia_api_key,
-            model="meta/llama-3.1-70b-instruct",
-            temperature=0,
-            max_tokens=800,
-            request_timeout=120,
-            max_retries=0
-        )
-
-        # 🔥 GRAPH PROMPT (FULL EXTRACTION)
-        self.GRAPH_PROMPT = ChatPromptTemplate.from_messages([
-            ("system",
-"""
+GRAPH_SYSTEM_PROMPT = """
 Extract a COMPLETE legal knowledge graph from the given text.
 
 Rules:
@@ -64,119 +36,135 @@ Rules:
 
 Return ONLY JSON.
 """
-             ),
-            ("human", "{input}")
-        ])
 
-        # 🔥 GRAPH TRANSFORMER
+ALLOWED_NODES = [
+    "Party", "Clause", "Obligation", "Right", "Payment",
+    "Service", "TerminationCondition", "Liability", "ConfidentialInformation",
+]
+
+ALLOWED_RELATIONSHIPS = [
+    "HAS_CLAUSE", "HAS_OBLIGATION", "OWES_PAYMENT",
+    "PROVIDES_SERVICE", "CAN_TERMINATE", "LIMITS_LIABILITY",
+]
+
+ENTITY_ALIASES = {
+    "service provider": "provider",
+    "vendor": "provider",
+    "supplier": "provider",
+    "client": "customer",
+    "customer": "customer",
+}
+
+IGNORED_ENTITIES = {"agreement", "contract"}
+
+SECTION_PATTERN = re.compile(
+    r"(\d+\.\s+[A-Z][A-Z\s]+|\d+(\.\d+)*|§\d+|Section\s+\d+|Article\s+[IVX]+)",
+    re.VERBOSE | re.IGNORECASE,
+)
+
+# NVIDIA free tier: ~3 RPM, 5000 TPM — 22s interval keeps us safely under both limits
+NVIDIA_MIN_INTERVAL = 22.0
+NVIDIA_429_BACKOFFS = [30, 60, 90, 120, 180]
+
+
+class LegalRAGIngestion:
+    def __init__(self):
+        self.progress = ProgressTracker()
+        self.langfuse_handler = get_langfuse_handler()
+
+        self.last_call_time: float = 0.0
+        self._nvidia_semaphore: asyncio.Semaphore | None = None
+
+        self.llm = ChatOpenAI(
+            openai_api_base="https://integrate.api.nvidia.com/v1",
+            openai_api_key=settings.nvidia_api_key,
+            model="meta/llama-3.1-70b-instruct",
+            temperature=0,
+            max_tokens=800,
+            request_timeout=120,
+            max_retries=0,
+        )
+
         self.graph_transformer = LLMGraphTransformer(
             llm=self.llm,
-            prompt=self.GRAPH_PROMPT,
-            allowed_nodes=[
-                "Party", "Clause", "Obligation", "Right", "Payment",
-                "Service", "TerminationCondition", "Liability", "ConfidentialInformation"
-            ],
-            allowed_relationships=[
-                "HAS_CLAUSE", "HAS_OBLIGATION", "OWES_PAYMENT",
-                "PROVIDES_SERVICE", "CAN_TERMINATE", "LIMITS_LIABILITY"
-            ],
+            prompt=ChatPromptTemplate.from_messages([
+                ("system", GRAPH_SYSTEM_PROMPT),
+                ("human", "{input}"),
+            ]),
+            allowed_nodes=ALLOWED_NODES,
+            allowed_relationships=ALLOWED_RELATIONSHIPS,
             strict_mode=True,
             node_properties=False,
             relationship_properties=False,
         )
 
-        # 🔥 EMBEDDINGS (HYBRID)
         self.embedding_model = HuggingFaceEmbeddings(
             model_name="BAAI/bge-large-en-v1.5",
-            model_kwargs={'device': 'cpu'},
-            encode_kwargs={'normalize_embeddings': True, 'batch_size': 32}
+            model_kwargs={"device": "cpu"},
+            encode_kwargs={"normalize_embeddings": True, "batch_size": 32},
         )
 
         self.sparse_model = SparseTextEmbedding(model_name="prithivida/Splade_PP_en_v1")
-
         self.qdrant = AsyncQdrantClient(url=settings.qdrant_url)
         self.collection_name = "legal_contracts_hybrid"
-
         self.neo4j = Neo4jService()
 
-    # =================================================
-    async def init_db(self):
-        exists = await self.qdrant.collection_exists(self.collection_name)
-
-        if not exists:
-            await self.qdrant.create_collection(
-                collection_name=self.collection_name,
-                vectors_config={
-                    "dense": models.VectorParams(size=1024, distance=models.Distance.COSINE)
-                },
-                sparse_vectors_config={
-                    "sparse": models.SparseVectorParams(modifier=models.Modifier.IDF)
-                }
-            )
-
-    # =================================================
-    @trace_ingestion(name="parse_pdf")
-    async def parse_pdf(self, file_path: str):
-
-        parser = LlamaParse(
+        self.parser = LlamaParse(
             api_key=settings.llama_cloud_api_key,
             result_type="markdown",
-            parsing_instruction="Extract text exactly and preserve structure."
+            parsing_instruction="Extract text exactly and preserve structure.",
         )
 
-        docs = await asyncio.to_thread(parser.load_data, file_path)
+    @property
+    def nvidia_semaphore(self) -> asyncio.Semaphore:
+        # Lazily created to ensure it belongs to the running event loop (Python 3.10+)
+        if self._nvidia_semaphore is None:
+            self._nvidia_semaphore = asyncio.Semaphore(1)
+        return self._nvidia_semaphore
+
+    async def init_qdrant(self) -> None:
+        if not await self.qdrant.collection_exists(self.collection_name):
+            await self.qdrant.create_collection(
+                collection_name=self.collection_name,
+                vectors_config={"dense": models.VectorParams(size=1024, distance=models.Distance.COSINE)},
+                sparse_vectors_config={"sparse": models.SparseVectorParams(modifier=models.Modifier.IDF)},
+            )
+
+    @trace_ingestion(name="parse_pdf")
+    async def parse_pdf(self, file_path: str) -> str:
+        docs = await asyncio.to_thread(self.parser.load_data, file_path)
         return "\n\n".join(doc.text for doc in docs)
 
-    # =================================================
-    def split_legal_sections(self, text: str):
-
-        pattern = re.compile(r"""
-        (
-            \d+\.\s+[A-Z][A-Z\s]+|
-            \d+(\.\d+)*|
-            §\d+|
-            Section\s+\d+|
-            Article\s+[IVX]+
-        )
-        """, re.VERBOSE | re.IGNORECASE)
-
-        matches = list(pattern.finditer(text))
-
+    def _split_legal_sections(self, text: str) -> list[str]:
+        matches = list(SECTION_PATTERN.finditer(text))
         if not matches:
             return [text]
 
         sections = []
-        for i, m in enumerate(matches):
-            start = m.start()
+        for i, match in enumerate(matches):
+            start = match.start()
             end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-            sections.append(text[start:end].strip())
-
+            section = text[start:end].strip()
+            if section:
+                sections.append(section)
         return sections
 
-    # =================================================
-    def extract_clause_metadata(self, text: str):
-
+    def _extract_clause_metadata(self, text: str) -> dict:
         metadata = {}
-
-        match = re.search(r'^(\d+(\.\d+)*)[.:\s]+(.+)', text, re.MULTILINE)
+        match = re.search(r"^(\d+(\.\d+)*)[.:\s]+(.+)", text, re.MULTILINE)
         if match:
             metadata["clause_number"] = match.group(1)
             metadata["clause_title"] = match.group(3)
             metadata["clause_path"] = match.group(1)
-
-        if "clause_path" not in metadata:
+        else:
             h = int(hashlib.sha256(text[:50].encode()).hexdigest(), 16) % 10000
             metadata["clause_path"] = f"section_{h}"
 
-        metadata["clause_type"] = self.classify_clause(text)
-
+        metadata["clause_type"] = self._classify_clause(text)
         return metadata
 
-    # =================================================
-    def classify_clause(self, text):
-
+    def _classify_clause(self, text: str) -> str:
         t = text.lower()
-
         if "payment" in t:
             return "Payment"
         if "terminate" in t:
@@ -185,234 +173,174 @@ Return ONLY JSON.
             return "Confidentiality"
         if "liability" in t:
             return "Liability"
-
         return "General"
 
-    # =================================================
     @trace_ingestion(name="chunk_document")
-    def chunk_document(self, text: str, document_id: str):
-
-        sections = self.split_legal_sections(text)
-
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=900,
-            chunk_overlap=120
-        )
-
+    def chunk_document(self, text: str, document_id: str) -> list[Document]:
+        splitter = RecursiveCharacterTextSplitter(chunk_size=900, chunk_overlap=120)
         chunks = []
 
-        for section in sections:
-
-            doc = Document(page_content=section)
-            doc.metadata["document_id"] = document_id
-
-            meta = self.extract_clause_metadata(section)
-            doc.metadata.update(meta)
-
-            split_docs = splitter.split_documents([doc])
-
-            for i, c in enumerate(split_docs):
-                c.metadata["chunk_index"] = i
-                chunks.append(c)
+        for section in self._split_legal_sections(text):
+            doc = Document(page_content=section, metadata={
+                "document_id": document_id,
+                **self._extract_clause_metadata(section),
+            })
+            for i, chunk in enumerate(splitter.split_documents([doc])):
+                chunk.metadata["chunk_index"] = i
+                chunks.append(chunk)
 
         return chunks
 
-    # =================================================
-    def filter_entities(self, nodes):
+    def _normalize_entity(self, text: str) -> str:
+        text = re.sub(r"[^a-z0-9 ]", "", str(text).lower().strip())
+        return ENTITY_ALIASES.get(text, text)
 
-        IGNORE = {'agreement','contract'}  # 🔥 reduced
-
+    def _filter_entities(self, nodes: list) -> list:
         seen = set()
         out = []
-
-        for n in nodes:
-            t = re.sub(r'[^a-z0-9 ]', '', n.id.lower())
-
-            if len(t) < 3 or t in IGNORE:
+        for node in nodes:
+            normalized = re.sub(r"[^a-z0-9 ]", "", node.id.lower())
+            if len(normalized) < 3 or normalized in IGNORED_ENTITIES or normalized in seen:
                 continue
-            if t in seen:
-                continue
-
-            seen.add(t)
-            n.id = t
-            out.append(n)
-
+            seen.add(normalized)
+            node.id = normalized
+            out.append(node)
         return out
 
-    # =================================================
-    @trace_ingestion(name="extract_graph")
-    async def extract_graph(self, chunks):
+    async def _call_nvidia(self, batch: list) -> list:
+        """Single NVIDIA API call with rate limiting and retry logic."""
+        async with self.nvidia_semaphore:
+            for attempt in range(5):
+                try:
+                    now = asyncio.get_event_loop().time()
+                    wait = NVIDIA_MIN_INTERVAL - (now - self.last_call_time)
+                    if wait > 0:
+                        await asyncio.sleep(wait)
 
-        semaphore = asyncio.Semaphore(1)  # 🔥 NO BURST
+                    run_kwargs = {}
+                    if self.langfuse_handler:
+                        run_kwargs["config"] = {"callbacks": [self.langfuse_handler]}
+
+                    result = await self.graph_transformer.aconvert_to_graph_documents(batch, **run_kwargs)
+                    self.last_call_time = asyncio.get_event_loop().time()
+
+                    if not result or all(not g.nodes for g in result):
+                        logger.info("No legal entities found in chunk, skipping")
+                        return result
+
+                    return result
+
+                except Exception as e:
+                    error_str = str(e).lower()
+                    if "429" in error_str or "rate" in error_str or "too many requests" in error_str:
+                        wait_time = NVIDIA_429_BACKOFFS[attempt] if attempt < len(NVIDIA_429_BACKOFFS) else 180
+                        logger.info(f"NVIDIA rate limit hit, waiting {wait_time}s (attempt {attempt + 1}/5)")
+                    else:
+                        wait_time = 1.5 * (attempt + 1)
+                        logger.warning(f"NVIDIA call failed (attempt {attempt + 1}/5): {e}, retrying in {wait_time}s")
+
+                    await asyncio.sleep(wait_time)
+
+            logger.error("Chunk permanently failed after 5 retries")
+            return []
+
+    def _postprocess_graph(self, raw_results: list) -> list:
+        """Normalize, filter, and cap nodes/relationships from raw LLM graph output."""
         graph_docs = []
 
-        self.last_call_time = getattr(self, "last_call_time", 0)
-        self.min_interval = 22.0  # 🔥 Increased to 22s (~2.7 RPM) to avoid Strict 5000 Tokens/Minute limit
-
-        def normalize(text):
-            text = str(text).lower().strip()
-            text = re.sub(r'[^a-z0-9 ]', '', text)
-
-            mapping = {
-                "service provider": "provider",
-                "vendor": "provider",
-                "supplier": "provider",
-                "client": "customer",
-                "customer": "customer"
-            }
-            return mapping.get(text, text)
-
-        async def process(batch):
-            async with semaphore:
-
-                for attempt in range(5):
-                    try:
-                        # 🔥 GLOBAL RATE LIMIT
-                        now = asyncio.get_event_loop().time()
-                        wait = self.min_interval - (now - self.last_call_time)
-                        if wait > 0:
-                            await asyncio.sleep(wait)
-
-                        res = await self.graph_transformer.aconvert_to_graph_documents(batch)
-                        
-                        logger.info(f"✅ Chunk processed via NVIDIA API successfully.")
-
-                        self.last_call_time = asyncio.get_event_loop().time()
-
-                        # 🔥 GRACEFULLY HANDLE EMPTY OUTPUT (e.g. Table of Contents, addresses)
-                        if not res or all(not g.nodes for g in res):
-                            logger.info("ℹ️ No legal entities found in this chunk. Skipping.")
-                            return res
-
-                        return res
-
-                    except Exception as e:
-                        error_str = str(e).lower()
-                        if "429" in error_str or "rate" in error_str or "too many requests" in error_str:
-                            backoffs = [5, 15, 30, 60, 90]
-                            wait_time = backoffs[attempt] if attempt < len(backoffs) else 90
-                            
-                            # Clean informational log to avoid flooding the console with scary warnings
-                            logger.info(f"⏳ NVIDIA Rate Limit Burst Reached. Auto-pacing for {wait_time}s...")
-                        else:
-                            wait_time = 1.5 * (attempt + 1)
-                            logger.warning(f"Retry {attempt+1}/5: {e}, waiting {wait_time}s")
-                        
-                        await asyncio.sleep(wait_time)
-
-                return []
-
-        # Process sequentially so rate limits are tightly controlled
-        results = []
-        for i in range(0, len(chunks), 1):
-            batch = chunks[i:i+1]
-            res = await process(batch)
-            results.append(res)
-
-        for res in results:
+        for res in raw_results:
             for g in res:
                 if not g.nodes:
                     continue
 
-                logger.info(f"RAW LLM → nodes: {len(g.nodes)}, rels: {len(g.relationships)}")
+                logger.info(f"Raw LLM output: {len(g.nodes)} nodes, {len(g.relationships)} relationships")
 
-                g.nodes = self.filter_entities(g.nodes)
-
-                for n in g.nodes:
-                    n.id = normalize(n.id)
-
+                g.nodes = self._filter_entities(g.nodes)
+                for node in g.nodes:
+                    node.id = self._normalize_entity(node.id)
                 g.nodes = g.nodes[:20]
 
-                valid = {n.id for n in g.nodes}
-
+                valid_ids = {n.id for n in g.nodes}
                 clean_rels = []
-                for r in g.relationships:
-                    r.source.id = normalize(r.source.id)
-                    r.target.id = normalize(r.target.id)
-
-                    # 🔥 STRICT REL FILTER: Both endpoints must exist in nodes
-                    if r.source.id in valid and r.target.id in valid:
-                        clean_rels.append(r)
-
+                for rel in g.relationships:
+                    rel.source.id = self._normalize_entity(rel.source.id)
+                    rel.target.id = self._normalize_entity(rel.target.id)
+                    if rel.source.id in valid_ids and rel.target.id in valid_ids:
+                        clean_rels.append(rel)
                 g.relationships = clean_rels[:30]
 
-                # 🔥 ALLOW SMALL GRAPHS
                 if g.nodes:
                     graph_docs.append(g)
 
-        logger.info(f"✅ Extracted {len(graph_docs)} graph docs")
-
         return graph_docs
 
-    # =================================================
-    async def store_graph_to_neo4j(self, graph_docs, document_id):
+    @trace_ingestion(name="extract_graph")
+    async def extract_graph(self, chunks: list) -> list:
+        raw_results = []
+        failed = 0
 
-        await self.neo4j.create_document_node(document_id, {"type": "Contract"})
-        await self.neo4j.store_graph_documents(graph_docs, document_id)
+        for chunk in chunks:
+            result = await self._call_nvidia([chunk])
+            if result == []:
+                failed += 1
+            raw_results.append(result)
 
-    # =================================================
-    async def index_chunks(self, chunks):
+        if failed:
+            logger.warning(f"{failed}/{len(chunks)} chunks failed graph extraction permanently")
 
-        BATCH_SIZE = 16  # 🔥 tune 8–32 based on CPU
+        graph_docs = self._postprocess_graph(raw_results)
+        logger.info(f"Extracted {len(graph_docs)} graph documents")
+        return graph_docs
 
-        for i in range(0, len(chunks), BATCH_SIZE):
+    async def _index_chunks(self, chunks: list) -> None:
+        batch_size = 16
 
-            batch = chunks[i:i+BATCH_SIZE]
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
             texts = [c.page_content for c in batch]
 
-            # 🔹 Dense embeddings (batched)
-            dense = await asyncio.to_thread(
-                self.embedding_model.embed_documents,
-                texts
-            )
-
-            # 🔹 Sparse embeddings (batched)
-            sparse = await asyncio.to_thread(
-                lambda: list(self.sparse_model.embed(texts))
-            )
+            dense = await asyncio.to_thread(self.embedding_model.embed_documents, texts)
+            sparse = await asyncio.to_thread(lambda: list(self.sparse_model.embed(texts)))
 
             points = []
-
-            for j, c in enumerate(batch):
-
-                cid = hashlib.md5(c.page_content.encode()).hexdigest()
-
+            for j, chunk in enumerate(batch):
+                cid = hashlib.sha256(chunk.page_content.encode()).hexdigest()
                 points.append(models.PointStruct(
-                    id=int(cid, 16) % (2**63),
-                    payload={"text": c.page_content, **c.metadata},
+                    id=int(cid, 16) % (2 ** 63),
+                    payload={"text": chunk.page_content, **chunk.metadata},
                     vector={
                         "dense": dense[j],
                         "sparse": models.SparseVector(
                             indices=sparse[j].indices.tolist(),
-                            values=sparse[j].values.tolist()
-                        )
-                    }
+                            values=sparse[j].values.tolist(),
+                        ),
+                    },
                 ))
 
-            # 🔹 Upsert per batch (prevents memory spikes)
             await self.qdrant.upsert(self.collection_name, points)
+            logger.info(f"Indexed batch {i // batch_size + 1}")
 
-            logger.info(f"✅ Indexed batch {i//BATCH_SIZE + 1}")
-
-    # =================================================
     @trace_ingestion(name="process_document")
-    async def process_document(self, file_path, document_id, job_id=None):
+    async def process_document(self, file_path: str, document_id: str, job_id: str = None) -> list:
+        await self.init_qdrant()
 
-        await self.init_db()
-
+        self.progress.update("parsing", document_id=document_id, progress=10, stage="parse_pdf")
         text = await self.parse_pdf(file_path)
 
-        chunks = self.chunk_document(text, document_id)
+        self.progress.update("chunking", document_id=document_id, progress=30, stage="chunk")
+        chunks = await asyncio.to_thread(self.chunk_document, text, document_id)
 
+        self.progress.update("graph", document_id=document_id, progress=50, stage="extract_graph")
         graph_docs = await self.extract_graph(chunks)
+        await self.neo4j.create_document_node(document_id, {"type": "Contract"})
+        await self.neo4j.store_graph_documents(graph_docs, document_id)
 
-        await self.store_graph_to_neo4j(graph_docs, document_id)
+        self.progress.update("indexing", document_id=document_id, progress=80, stage="index_chunks")
+        await self._index_chunks(chunks)
 
-        await self.index_chunks(chunks)
-
-        logger.info("✅ FULL PIPELINE COMPLETE")
-
+        self.progress.update("complete", document_id=document_id, progress=100, stage="done")
+        logger.info("Pipeline complete")
         return chunks
 
-    async def close(self):
+    async def close(self) -> None:
         await self.neo4j.close()
