@@ -1,7 +1,3 @@
-# =============================
-# 🚀 UNIVERSAL RAG INGESTION ENGINE (FINAL PRODUCTION)
-# =============================
-
 import asyncio
 import hashlib
 import logging
@@ -11,7 +7,6 @@ import sys
 import time
 from pathlib import Path
 
-# Adjust path for microservice architecture
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from fastembed import SparseTextEmbedding
@@ -24,8 +19,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from llama_parse import LlamaParse
 from qdrant_client import AsyncQdrantClient, models
 
-# Assuming these are available in your shared microservice utilities
-from src.shared.langfuse_config import get_langfuse_handler, trace_ingestion
+from src.shared.langfuse_config import get_langfuse_handler, update_observation, update_trace
 from src.shared.neo4j_service import Neo4jService
 from src.shared.progress_tracker import ProgressTracker
 from src.shared.settings import settings
@@ -46,15 +40,15 @@ Return ONLY valid JSON.
 
 ALLOWED_NODES = {
     "Party", "Clause", "Obligation", "Right", "Payment",
-    "Service", "TerminationCondition", "Liability", 
+    "Service", "TerminationCondition", "Liability",
     "ConfidentialInformation", "Date", "Jurisdiction",
-    "Definition", "Regulation", "Asset"
+    "Definition", "Regulation", "Asset",
 }
 
 ALLOWED_RELATIONSHIPS = {
     "HAS_CLAUSE", "HAS_OBLIGATION", "OWES_PAYMENT",
     "PROVIDES_SERVICE", "CAN_TERMINATE", "LIMITS_LIABILITY",
-    "GOVERNS", "EFFECTIVE_ON", "DEFINES", "COMPLIES_WITH", "APPLIES_TO"
+    "GOVERNS", "EFFECTIVE_ON", "DEFINES", "COMPLIES_WITH", "APPLIES_TO",
 }
 
 ENTITY_ALIASES = {
@@ -79,13 +73,14 @@ SECTION_PATTERN = re.compile(
 class LegalRAGIngestion:
     def __init__(self):
         self.progress = ProgressTracker()
-        self.langfuse_handler = get_langfuse_handler()
 
-        # Configurable concurrency for Kubernetes Pod scaling. 
         max_concurrency = int(os.getenv("MAX_GRAPH_CONCURRENCY", "15"))
         self._semaphore = asyncio.Semaphore(max_concurrency)
 
-        # GPT-4o-mini: Fast, extremely cheap, incredible structured JSON extraction
+        # LLM is built WITHOUT a callback here intentionally.
+        # get_langfuse_handler() must be called inside an active @observe
+        # scope (process_document_job) to nest under the correct trace.
+        # We attach the handler lazily in process_document() below.
         self.llm = ChatOpenAI(
             model="gpt-4o-mini",
             temperature=0,
@@ -103,7 +98,7 @@ class LegalRAGIngestion:
             allowed_nodes=list(ALLOWED_NODES),
             allowed_relationships=list(ALLOWED_RELATIONSHIPS),
             strict_mode=True,
-            node_properties=True, 
+            node_properties=True,
             relationship_properties=True,
         )
 
@@ -124,6 +119,18 @@ class LegalRAGIngestion:
             parsing_instruction="Extract text exactly and preserve legal numbering and structure.",
         )
 
+    def _attach_langfuse_handler(self) -> None:
+        """Bind a fresh CallbackHandler to self.llm.
+
+        Called at the START of process_document() which runs inside the
+        @trace_ingestion scope — so the handler is correctly nested under
+        the active trace and every LLMGraphTransformer call is captured.
+        """
+        handler = get_langfuse_handler()
+        if handler:
+            self.llm.callbacks = [handler]
+            logger.debug("Langfuse handler attached to LLM")
+
     async def init_qdrant(self) -> None:
         if not await self.qdrant.collection_exists(self.collection_name):
             await self.qdrant.create_collection(
@@ -132,26 +139,29 @@ class LegalRAGIngestion:
                 sparse_vectors_config={"sparse": models.SparseVectorParams(modifier=models.Modifier.IDF)},
             )
 
-    @trace_ingestion(name="parse_pdf")
     async def parse_pdf(self, file_path: str) -> str:
+        update_observation("parse_pdf", {"file_path": file_path, "stage": "parse_pdf_start"})
         max_retries = 3
         for attempt in range(max_retries):
             try:
                 docs = await asyncio.to_thread(self.parser.load_data, file_path)
-                return "\n\n".join(doc.text for doc in docs)
+                text = "\n\n".join(doc.text for doc in docs)
+                update_observation("parse_pdf", {"char_count": len(text), "stage": "parse_pdf_done"})
+                return text
             except Exception as e:
                 wait_time = 2 ** attempt
-                logger.warning(f"PDF Parsing failed (Attempt {attempt + 1}/{max_retries}): {e}. Retrying in {wait_time}s...")
+                logger.warning(
+                    "PDF Parsing failed (Attempt %d/%d): %s. Retrying in %ds...",
+                    attempt + 1, max_retries, e, wait_time,
+                )
                 await asyncio.sleep(wait_time)
-        
-        logger.error(f"PDF Parsing permanently failed for {file_path}")
+
         raise RuntimeError(f"Failed to parse PDF {file_path} after {max_retries} attempts.")
 
     def _split_legal_sections(self, text: str) -> list[str]:
         matches = list(SECTION_PATTERN.finditer(text))
         if not matches:
             return [text]
-
         sections = []
         for i, match in enumerate(matches):
             start = match.start()
@@ -162,11 +172,9 @@ class LegalRAGIngestion:
         return sections
 
     def _classify_clause_metadata(self, text: str) -> dict:
-        """Assign importance weights and clause types to enable MCP routing and RRF filtering."""
         t = text.lower()
         metadata = {}
 
-        # 1. Title matching
         match = re.search(r"^(\d+(\.\d+)*)[.:\s]+(.+)", text, re.MULTILINE)
         if match:
             metadata["clause_number"] = match.group(1)
@@ -176,7 +184,6 @@ class LegalRAGIngestion:
             h = int(hashlib.sha256(text[:50].encode()).hexdigest(), 16) % 10000
             metadata["clause_path"] = f"section_{h}"
 
-        # 2. Smart Classification & Importance
         if "payment" in t or "fee" in t or "pricing" in t:
             metadata.update({"clause_type": "Payment", "importance": 3})
         elif "terminate" in t or "cancellation" in t:
@@ -194,33 +201,31 @@ class LegalRAGIngestion:
 
         return metadata
 
-    @trace_ingestion(name="chunk_document")
     def chunk_document(self, text: str, document_id: str) -> list[Document]:
+        # Called via asyncio.to_thread — contextvars don't cross thread
+        # boundaries so update_observation is a no-op here. Timing is
+        # captured in process_document() and written to the trace there.
         chunks = []
-        standard_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=150)
+        splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=150)
 
         for section in self._split_legal_sections(text):
             clause_meta = self._classify_clause_metadata(section)
-            
-            if len(section) < 2000:
-                section_chunks = [section] 
-            else:
-                section_chunks = standard_splitter.split_text(section)
+            section_chunks = [section] if len(section) < 2000 else splitter.split_text(section)
 
             for i, chunk_text in enumerate(section_chunks):
-                # 🔥 CRITICAL: Generate a deterministic chunk_id for Graph <-> Vector linking & deduplication
-                chunk_id = hashlib.sha256(f"{document_id}_{clause_meta['clause_path']}_{i}_{chunk_text[:50]}".encode()).hexdigest()
-                
-                doc = Document(
-                    page_content=chunk_text, 
+                chunk_id = hashlib.sha256(
+                    f"{document_id}_{clause_meta['clause_path']}_{i}_{chunk_text[:50]}".encode()
+                ).hexdigest()
+
+                chunks.append(Document(
+                    page_content=chunk_text,
                     metadata={
                         "document_id": document_id,
                         "chunk_index": i,
-                        "chunk_id": chunk_id,  # The Bridge
-                        **clause_meta
-                    }
-                )
-                chunks.append(doc)
+                        "chunk_id": chunk_id,
+                        **clause_meta,
+                    },
+                ))
 
         return chunks
 
@@ -232,126 +237,97 @@ class LegalRAGIngestion:
         seen = set()
         out = []
         for node in nodes:
-            # 🛡️ HARD VALIDATION: Drop hallucinated node types
             if node.type not in ALLOWED_NODES:
                 continue
-
             normalized = re.sub(r"[^a-z0-9 ]", "", node.id.lower())
             if len(normalized) < 3 or normalized in IGNORED_ENTITIES or normalized in seen:
                 continue
-            
             seen.add(normalized)
             node.id = normalized
-            
             if not hasattr(node, "properties") or not node.properties:
                 node.properties = {}
-                
-            # 🔥 INJECT THE BRIDGE: Link Node to exact Vector Chunk
             node.properties["chunk_id"] = chunk_metadata.get("chunk_id")
             node.properties["document_id"] = chunk_metadata.get("document_id")
             node.properties["clause_type"] = chunk_metadata.get("clause_type")
             node.properties["importance"] = chunk_metadata.get("importance")
-            
             out.append(node)
         return out
 
     async def _extract_batch_graph(self, batch: list[Document]) -> list:
+        # self.llm.callbacks is set by _attach_langfuse_handler() which is
+        # called inside the active @trace_ingestion scope, so every OpenAI
+        # call here is captured with tokens + cost under the correct trace.
         async with self._semaphore:
-            run_kwargs = {}
-            if self.langfuse_handler:
-                run_kwargs["config"] = {"callbacks": [self.langfuse_handler]}
-            
-            max_retries = 3
-            for attempt in range(max_retries):
+            for attempt in range(3):
                 try:
-                    return await self.graph_transformer.aconvert_to_graph_documents(batch, **run_kwargs)
+                    return await self.graph_transformer.aconvert_to_graph_documents(batch)
                 except Exception as e:
                     wait_time = 2 ** attempt
                     logger.warning(
-                        f"Graph extraction batch failed (Attempt {attempt + 1}/{max_retries}): {str(e)}. "
-                        f"Retrying in {wait_time}s..."
+                        "Graph batch failed (attempt %d/3): %s. Retrying in %ds...",
+                        attempt + 1, e, wait_time,
                     )
                     await asyncio.sleep(wait_time)
-            
-            logger.error("Graph extraction batch permanently failed after 3 attempts. Data for this batch is lost.")
+            logger.error("Graph extraction batch permanently failed after 3 attempts.")
             return []
 
-    def _postprocess_graph(self, raw_results: list, original_chunks: list[Document]) -> list:
+    def _postprocess_graph(self, raw_results: list) -> list:
         graph_docs = []
-        
         for result_batch in raw_results:
-            for i, g in enumerate(result_batch):
+            for g in result_batch:
                 if not g.nodes:
                     continue
-                
                 chunk_meta = g.source.metadata if g.source else {}
-
                 g.nodes = self._filter_entities(g.nodes, chunk_meta)
-                
                 valid_ids = {n.id for n in g.nodes}
                 clean_rels = []
-                
                 for rel in g.relationships:
-                    # 🛡️ HARD VALIDATION: Drop hallucinated relationships
                     if rel.type not in ALLOWED_RELATIONSHIPS:
                         continue
-                        
                     rel.source.id = self._normalize_entity(rel.source.id)
                     rel.target.id = self._normalize_entity(rel.target.id)
-                    
                     if rel.source.id in valid_ids and rel.target.id in valid_ids:
                         if not hasattr(rel, "properties") or not rel.properties:
                             rel.properties = {}
-                            
-                        # 🔥 INJECT THE BRIDGE: Link Relationship to exact Vector Chunk
                         rel.properties["chunk_id"] = chunk_meta.get("chunk_id")
                         rel.properties["document_id"] = chunk_meta.get("document_id")
                         clean_rels.append(rel)
-                
                 g.relationships = clean_rels
-
                 if g.nodes:
                     graph_docs.append(g)
-
         return graph_docs
 
-    @trace_ingestion(name="extract_graph")
     async def extract_graph(self, chunks: list[Document]) -> list:
-        batch_size = 3 
-        tasks = []
-        
-        for i in range(0, len(chunks), batch_size):
-            batch = chunks[i:i + batch_size]
-            tasks.append(self._extract_batch_graph(batch))
-
+        update_observation("extract_graph", {"chunk_count": len(chunks), "stage": "extract_graph_start"})
+        tasks = [
+            self._extract_batch_graph(chunks[i:i + 3])
+            for i in range(0, len(chunks), 3)
+        ]
         raw_results = await asyncio.gather(*tasks)
-        graph_docs = self._postprocess_graph(raw_results, chunks)
-        
-        logger.info(f"Extracted {len(graph_docs)} refined, grounded graph documents")
+        graph_docs = self._postprocess_graph(raw_results)
+        update_observation("extract_graph", {"graph_docs_count": len(graph_docs), "stage": "extract_graph_done"})
+        logger.info("Extracted %d graph documents", len(graph_docs))
         return graph_docs
 
-    @trace_ingestion(name="index_chunks")
     async def _index_chunks(self, chunks: list[Document]) -> None:
+        update_observation("index_chunks", {"chunk_count": len(chunks), "stage": "index_chunks_start"})
         batch_size = 32
 
         for i in range(0, len(chunks), batch_size):
             batch = chunks[i:i + batch_size]
             texts = [c.page_content for c in batch]
 
-            # Sequential to avoid CPU overload — both models share CPU cores
             dense = await asyncio.to_thread(self.embedding_model.embed_documents, texts)
-            sparse = await asyncio.to_thread(lambda: list(self.sparse_model.embed(texts)))
+            sparse = await asyncio.to_thread(lambda t=texts: list(self.sparse_model.embed(t)))
 
             points = []
             for j, chunk in enumerate(batch):
                 chunk_id = chunk.metadata["chunk_id"]
-                
                 points.append(models.PointStruct(
-                    # Qdrant uses an integer ID derived deterministically from the chunk_id hash
                     id=int(chunk_id, 16) % (2 ** 63),
                     payload={
                         "text": chunk.page_content,
-                        "chunk_id": chunk_id, # 🔥 THE BRIDGE is stored in the payload
+                        "chunk_id": chunk_id,
                         "clause_type": chunk.metadata.get("clause_type"),
                         "importance": chunk.metadata.get("importance"),
                         "document_id": chunk.metadata.get("document_id"),
@@ -367,66 +343,82 @@ class LegalRAGIngestion:
                 ))
 
             await self.qdrant.upsert(self.collection_name, points)
-            logger.info(f"Indexed vector batch {i // batch_size + 1}")
+            logger.info("Indexed vector batch %d", i // batch_size + 1)
 
-    @trace_ingestion(name="process_document")
+        update_observation("index_chunks", {"stage": "index_chunks_done"})
+
     async def process_document(self, file_path: str, document_id: str, job_id: str = None) -> list[Document]:
+        # Attach the Langfuse handler NOW — we are inside the @trace_ingestion
+        # scope from process_document_job, so the handler correctly nests
+        # every LLM generation under the active trace.
+        self._attach_langfuse_handler()
+
         pipeline_start = time.time()
         await self.init_qdrant()
 
-        # ── Stage 1: PDF Parsing ──
+        # ── Stage 1: Parse ────────────────────────────────────────────────────
         self.progress.update("parsing", document_id=document_id, progress=10, stage="parse_pdf")
         t0 = time.time()
         text = await self.parse_pdf(file_path)
         parse_time = time.time() - t0
-        logger.info(f"[TIMING] PDF parsing: {parse_time:.1f}s ({len(text)} chars)")
+        update_trace({"stage": "parsed", "char_count": len(text), "parse_time_s": round(parse_time, 2)})
+        logger.info("[TIMING] PDF parsing: %.1fs (%d chars)", parse_time, len(text))
 
-        # ── Stage 2: Chunking ──
+        # ── Stage 2: Chunk ────────────────────────────────────────────────────
         self.progress.update("chunking", document_id=document_id, progress=25, stage="chunk")
         t0 = time.time()
         chunks = await asyncio.to_thread(self.chunk_document, text, document_id)
         chunk_time = time.time() - t0
-        logger.info(f"[TIMING] Chunking: {chunk_time:.1f}s ({len(chunks)} chunks)")
+        update_trace({"stage": "chunked", "chunk_count": len(chunks), "chunk_time_s": round(chunk_time, 2)})
+        logger.info("[TIMING] Chunking: %.1fs (%d chunks)", chunk_time, len(chunks))
 
-        # ── Stage 3: Parallel Graph Extraction & Vector Indexing ──
+        # ── Stage 3: Graph extraction + Vector indexing (parallel) ────────────
         self.progress.update("processing", document_id=document_id, progress=40, stage="parallel_extract_and_index")
-        
-        high_value_chunks = [c for c in chunks if c.metadata.get("importance", 1) >= 2]
-        
-        if not high_value_chunks:
-            logger.warning(f"No high-value chunks detected for {document_id}. Falling back to full extraction.")
-            high_value_chunks = chunks
-        
-        # PARALLEL GRAPH EXTRACTION (API-bound) & VECTOR INDEXING (CPU-bound)
+        high_value_chunks = [c for c in chunks if c.metadata.get("importance", 1) >= 2] or chunks
+        pruned = len(chunks) - len(high_value_chunks)
+
         t0 = time.time()
-        graph_task = asyncio.create_task(self.extract_graph(high_value_chunks))
-        index_task = asyncio.create_task(self._index_chunks(chunks))
-
-        graph_docs, _ = await asyncio.gather(graph_task, index_task)
+        graph_docs, _ = await asyncio.gather(
+            asyncio.create_task(self.extract_graph(high_value_chunks)),
+            asyncio.create_task(self._index_chunks(chunks)),
+        )
         parallel_time = time.time() - t0
-        logger.info(f"[TIMING] Graph extraction + Vector indexing (parallel): {parallel_time:.1f}s")
+        update_trace({
+            "stage": "extracted_and_indexed",
+            "graph_docs_count": len(graph_docs),
+            "chunks_pruned_from_graph": pruned,
+            "parallel_time_s": round(parallel_time, 2),
+        })
+        logger.info("[TIMING] Graph + Vector (parallel): %.1fs", parallel_time)
 
-        # ── Stage 4: Neo4j Storage ──
+        # ── Stage 4: Neo4j storage ────────────────────────────────────────────
         self.progress.update("neo4j_storage", document_id=document_id, progress=85, stage="store_graph")
         t0 = time.time()
         await self.neo4j.create_document_node(document_id, {"type": "Contract"})
         await self.neo4j.store_graph_documents(graph_docs, document_id)
         neo4j_time = time.time() - t0
-        logger.info(f"[TIMING] Neo4j storage: {neo4j_time:.1f}s")
+        update_trace({"stage": "neo4j_stored", "neo4j_time_s": round(neo4j_time, 2)})
+        logger.info("[TIMING] Neo4j storage: %.1fs", neo4j_time)
 
-        # ── Complete ──
+        # ── Done ──────────────────────────────────────────────────────────────
         self.progress.update("complete", document_id=document_id, progress=100, stage="done")
-        
         total_time = time.time() - pipeline_start
-        pruned_count = len(chunks) - len(high_value_chunks)
+        update_trace({
+            "stage": "complete",
+            "total_time_s": round(total_time, 2),
+            "document_id": document_id,
+            "job_id": job_id,
+        })
         logger.info(
-            f"[TIMING] ═══ Pipeline complete for {document_id} ═══\n"
-            f"  PDF Parse:    {parse_time:.1f}s\n"
-            f"  Chunking:     {chunk_time:.1f}s ({len(chunks)} chunks, {pruned_count} pruned from graph)\n"
-            f"  Graph+Vector: {parallel_time:.1f}s\n"
-            f"  Neo4j Store:  {neo4j_time:.1f}s\n"
-            f"  ─────────────────────────\n"
-            f"  TOTAL:        {total_time:.1f}s"
+            "[TIMING] ═══ Pipeline complete for %s ═══\n"
+            "  PDF Parse:    %.1fs\n"
+            "  Chunking:     %.1fs (%d chunks, %d pruned from graph)\n"
+            "  Graph+Vector: %.1fs\n"
+            "  Neo4j Store:  %.1fs\n"
+            "  ─────────────────────────\n"
+            "  TOTAL:        %.1fs",
+            document_id, parse_time, chunk_time, len(chunks), pruned,
+            parallel_time, neo4j_time, total_time,
         )
         return chunks
 
