@@ -7,6 +7,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -47,6 +48,20 @@ class IngestionWorker:
             "password": settings.redis_password,
         }
 
+    @staticmethod
+    def _parse_minio_url(file_url: str) -> tuple[str, str]:
+        parsed = urlparse(file_url)
+        if parsed.scheme != "minio":
+            raise ValueError(f"Unsupported file URL scheme: {parsed.scheme}")
+
+        bucket = parsed.netloc.strip()
+        key = parsed.path.lstrip("/")
+
+        if not bucket or not key:
+            raise ValueError(f"Invalid MinIO URL: {file_url}")
+
+        return bucket, key
+
     @trace_ingestion(name="process_document_job")
     async def process_job(self, job_data: dict) -> None:
         job_id = job_data.get("jobId")
@@ -55,7 +70,25 @@ class IngestionWorker:
         pdf_url = job_data.get("pdfUrl")
 
         if not all([job_id, document_id, pdf_url]):
-            logger.error(f"Missing required fields: jobId={job_id}, documentId={document_id}, pdfUrl={pdf_url}")
+            error_msg = (
+                f"Invalid queue payload: missing required fields "
+                f"(jobId={job_id}, documentId={document_id}, pdfUrl={pdf_url})"
+            )
+            logger.error(error_msg)
+
+            if job_id:
+                try:
+                    await asyncio.to_thread(self.db.update_job_status, job_id, "FAILED", error_msg)
+                    self._publish_status(job_id, "FAILED", documentId=document_id, error=error_msg)
+                except Exception as update_error:
+                    logger.error(f"Failed to mark malformed job payload as FAILED for {job_id}: {update_error}")
+
+            if document_id:
+                try:
+                    await asyncio.to_thread(self.db.update_document_status, document_id, "FAILED")
+                except Exception as update_error:
+                    logger.error(f"Failed to mark malformed document payload as FAILED for {document_id}: {update_error}")
+
             return
 
         current_status = await asyncio.to_thread(self.db.get_job_status, job_id)
@@ -70,8 +103,7 @@ class IngestionWorker:
             await asyncio.to_thread(self.db.update_document_status, document_id, "PROCESSING")
             self._publish_status(job_id, "IN_PROGRESS", documentId=document_id)
 
-            bucket = settings.minio_bucket
-            key = pdf_url.replace(f"minio://{bucket}/", "")
+            bucket, key = self._parse_minio_url(pdf_url)
 
             tmp_path = None
             try:

@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -19,24 +20,31 @@ class DatabaseService:
         )
         self.SessionLocal = sessionmaker(bind=self.engine)
 
-    def update_job_status(self, job_id: str, status: str, error: str = None) -> None:
+    def update_job_status(self, job_id: str, status: str, error: Optional[str] = None) -> None:
         with self.SessionLocal() as session:
             try:
+                result = None
                 if status == "IN_PROGRESS":
-                    session.execute(
+                    result = session.execute(
                         text('UPDATE "Job" SET status = :status, "startedAt" = :ts WHERE id = :id'),
                         {"status": status, "ts": datetime.now(timezone.utc), "id": job_id},
                     )
                 elif status == "COMPLETED":
-                    session.execute(
+                    result = session.execute(
                         text('UPDATE "Job" SET status = :status, "completedAt" = :ts WHERE id = :id'),
                         {"status": status, "ts": datetime.now(timezone.utc), "id": job_id},
                     )
                 elif status == "FAILED":
-                    session.execute(
+                    result = session.execute(
                         text('UPDATE "Job" SET status = :status, error = :error, "completedAt" = :ts WHERE id = :id'),
                         {"status": status, "error": error, "ts": datetime.now(timezone.utc), "id": job_id},
                     )
+                else:
+                    raise ValueError(f"Unsupported job status update: {status}")
+
+                if result.rowcount == 0:
+                    raise ValueError(f"Job not found for status update: {job_id}")
+
                 session.commit()
                 logger.info(f"Job {job_id} status -> {status}")
             except Exception as e:
@@ -47,10 +55,13 @@ class DatabaseService:
     def update_document_status(self, document_id: str, status: str) -> None:
         with self.SessionLocal() as session:
             try:
-                session.execute(
+                result = session.execute(
                     text('UPDATE "Document" SET status = :status WHERE id = :id'),
                     {"status": status, "id": document_id},
                 )
+                if result.rowcount == 0:
+                    raise ValueError(f"Document not found for status update: {document_id}")
+
                 session.commit()
                 logger.info(f"Document {document_id} status -> {status}")
             except Exception as e:

@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    openai_api_key: str = ""
     nvidia_api_key: str = ""
     llama_cloud_api_key: str
 

@@ -19,7 +19,8 @@ export const initQueue = async (): Promise<void> => {
         password: env.REDIS_PASSWORD
       },
       defaultJobOptions: {
-        attempts: 3,
+        // Worker handles failure status updates explicitly and does not re-raise.
+        attempts: 1,
         backoff: {
           type: 'exponential',
           delay: 2000

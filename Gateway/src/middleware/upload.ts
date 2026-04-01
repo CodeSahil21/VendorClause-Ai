@@ -4,18 +4,14 @@ import { ApiError } from '../utils/apiError';
 const storage = multer.memoryStorage();
 
 const allowedMimeTypes = [
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'text/plain',
-  'text/markdown'
+  'application/pdf'
 ];
 
 const fileFilter = (_req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
   if (allowedMimeTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new ApiError(400, `File type not allowed. Allowed types: PDF, DOC, DOCX, TXT, MD`));
+    cb(new ApiError(400, 'File type not allowed. Only PDF files are supported.'));
   }
 };
 

@@ -2,8 +2,11 @@ import axios from "axios";
 import { useAuthStore } from "@/store";
 import toast from "react-hot-toast";
 
+const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+const apiOrigin = apiBase.replace(/\/$/, "").replace(/\/api\/v1$/, "");
+
 const axiosInstance = axios.create({
-  baseURL: `${process.env.NEXT_PUBLIC_API_URL}/api/v1`,
+  baseURL: `${apiOrigin}/api/v1`,
   headers: {
     "Content-Type": "application/json",
   },

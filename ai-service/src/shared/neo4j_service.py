@@ -14,6 +14,11 @@ ALLOWED_REL_TYPES = {
     "PROVIDES_SERVICE",
     "CAN_TERMINATE",
     "LIMITS_LIABILITY",
+    "GOVERNS",
+    "EFFECTIVE_ON",
+    "DEFINES",
+    "COMPLIES_WITH",
+    "APPLIES_TO",
 }
 
 ENTITY_ALIASES = {
@@ -22,6 +27,9 @@ ENTITY_ALIASES = {
     "supplier": "provider",
     "client": "customer",
     "customer": "customer",
+    "buyer": "customer",
+    "purchaser": "customer",
+    "company": "company",
 }
 
 
@@ -46,6 +54,7 @@ class Neo4jService:
         async with self.driver.session() as session:
             await session.run("CREATE INDEX entity_id IF NOT EXISTS FOR (n:Entity) ON (n.id);")
             await session.run("CREATE INDEX document_id IF NOT EXISTS FOR (d:Document) ON (d.id);")
+            await session.run("CREATE INDEX chunk_id IF NOT EXISTS FOR (n:Entity) ON (n.chunk_id);")
         self._indexes_created = True
         logger.info("Neo4j indexes ensured")
 
@@ -73,19 +82,30 @@ class Neo4jService:
                     if not node.id or len(str(node.id).strip()) < 2:
                         continue
 
+                    # Extract bridge properties from node
+                    props = getattr(node, "properties", {}) or {}
+
                     await session.run(
                         """
                         MERGE (n:Entity {id: $id})
                         SET n.type = coalesce(n.type, $type),
-                            n.confidence = coalesce(n.confidence, $confidence)
+                            n.confidence = coalesce(n.confidence, $confidence),
+                            n.chunk_id = $chunk_id,
+                            n.document_id = $document_id,
+                            n.clause_type = $clause_type,
+                            n.importance = $importance
                         WITH n
-                        MATCH (d:Document {id: $document_id})
+                        MATCH (d:Document {id: $doc_id})
                         MERGE (d)-[:HAS_ENTITY]->(n)
                         """,
                         id=self.normalize_entity(node.id),
                         type=node.type,
-                        document_id=document_id,
+                        doc_id=document_id,
                         confidence=0.8,
+                        chunk_id=props.get("chunk_id"),
+                        document_id=props.get("document_id"),
+                        clause_type=props.get("clause_type"),
+                        importance=props.get("importance"),
                     )
                     stored_nodes += 1
 
@@ -98,6 +118,9 @@ class Neo4jService:
                         logger.warning(f"Dropped unsupported relationship type: {rel.type}")
                         continue
 
+                    # Extract bridge properties from relationship
+                    rel_props = getattr(rel, "properties", {}) or {}
+
                     await session.run(
                         f"""
                         MATCH (s:Entity {{id: $source}})
@@ -106,12 +129,16 @@ class Neo4jService:
                         WITH s, t, d
                         WHERE s IS NOT NULL AND t IS NOT NULL
                         MERGE (s)-[r:{rel_type} {{doc_id: $document_id}}]->(t)
-                        SET r.confidence = coalesce(r.confidence, $confidence)
+                        SET r.confidence = coalesce(r.confidence, $confidence),
+                            r.chunk_id = $chunk_id,
+                            r.rel_document_id = $rel_document_id
                         """,
                         source=self.normalize_entity(rel.source.id),
                         target=self.normalize_entity(rel.target.id),
                         document_id=document_id,
                         confidence=0.8,
+                        chunk_id=rel_props.get("chunk_id"),
+                        rel_document_id=rel_props.get("document_id"),
                     )
                     stored_rels += 1
 

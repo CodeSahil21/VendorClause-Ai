@@ -18,7 +18,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (socketRef.current) return;
 
-    const socketUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || 'http://localhost:4000';
+    const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+    const socketUrl = rawApiUrl.replace(/\/$/, '').replace(/\/api\/v1$/, '');
     const newSocket = io(socketUrl, {
       path: '/socket.io/',
       withCredentials: true,

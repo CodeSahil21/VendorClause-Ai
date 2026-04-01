@@ -12,6 +12,10 @@ export class DocumentService {
     sessionId: string,
     file: Express.Multer.File
   ): Promise<DocumentUploadResponse> {
+    if (file.mimetype !== 'application/pdf') {
+      throw new ApiError(400, 'Only PDF documents are supported for ingestion.');
+    }
+
     const session = await prisma.chatSession.findFirst({
       where: { id: sessionId, userId },
       include: { document: true }
