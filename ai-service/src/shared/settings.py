@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
     langfuse_host: str = "http://localhost:3040"
+    langfuse_base_url: str = "http://localhost:3040"
 
     class Config:
         env_file = ".env"
