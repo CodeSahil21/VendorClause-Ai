@@ -17,7 +17,7 @@ from redis import Redis
 
 from src.ingestion.ingestion_service import LegalRAGIngestion
 from src.shared.database_service import DatabaseService
-from src.shared.langfuse_config import trace_ingestion
+from src.shared.langfuse_config import trace_ingestion, update_trace
 from src.shared.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -69,6 +69,16 @@ class IngestionWorker:
         user_id = job_data.get("userId")
         pdf_url = job_data.get("pdfUrl")
 
+        # Tag the root Langfuse trace immediately — job_id, document_id and
+        # user_id appear on the trace card in the Langfuse dashboard so you
+        # can filter/search by any of them.
+        update_trace({
+            "job_id": job_id,
+            "document_id": document_id,
+            "user_id": user_id,
+            "stage": "job_start",
+        })
+
         if not all([job_id, document_id, pdf_url]):
             error_msg = (
                 f"Invalid queue payload: missing required fields "
@@ -119,6 +129,7 @@ class IngestionWorker:
             await asyncio.to_thread(self.db.update_job_status, job_id, "COMPLETED")
             await asyncio.to_thread(self.db.update_document_status, document_id, "READY")
             self._publish_status(job_id, "COMPLETED", documentId=document_id)
+            update_trace({"stage": "job_completed", "status": "COMPLETED"})
             logger.info(f"Job {job_id} completed")
 
         except Exception as e:
@@ -127,6 +138,7 @@ class IngestionWorker:
             await asyncio.to_thread(self.db.update_job_status, job_id, "FAILED", error_msg)
             await asyncio.to_thread(self.db.update_document_status, document_id, "FAILED")
             self._publish_status(job_id, "FAILED", documentId=document_id, error=error_msg)
+            update_trace({"stage": "job_failed", "status": "FAILED", "error": error_msg})
             # Not re-raised: BullMQ would retry and cause duplicate execution
 
     def _publish_status(self, job_id: str, status: str, **extra) -> None:
