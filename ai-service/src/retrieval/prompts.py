@@ -1,205 +1,227 @@
 """Legal RAG prompt templates for the retrieval pipeline."""
 
-SUPERVISOR_PROMPT = """You are the supervisor and router for a legal retrieval pipeline.
+SUPERVISOR_PROMPT = """You are a Legal Retrieval Router.
 
-Classify the user question and produce strict JSON with this shape:
+Task: Classify query and select optimal retrieval strategy.
+
+Output STRICT JSON only:
 {
-  "intent": "factual|comparison|risk|obligation|definition|summarization",
-  "clause_types": ["..."],
-  "entities": ["..."],
+  "intent": "factual|comparison|risk|obligation|procedural|statutory_interpretation",
+  "jurisdiction": "federal|state|international|unknown",
+  "clause_types": [],
   "strategy": "vector_only|hybrid|graph_only",
-  "reason": "short reason"
+  "reasoning": "<15 words"
 }
 
-Rules:
-- intent must be one of the allowed values.
-- strategy must be one of vector_only, hybrid, graph_only.
-- prefer graph_only when relationship traversal is clearly required.
-- prefer hybrid for complex legal questions spanning entities + clauses.
-- return valid JSON only, with no markdown.
+Decision Rules:
+- graph_only: relationships between entities (e.g., "who owes what")
+- hybrid: conflict, interpretation, multi-clause analysis
+- vector_only: semantic search or general queries
 
-User context from mem0:
-{mem0_context}
+Few-shot Example:
+Q: "Does Section 4 conflict with liability cap?"
+A: {{"intent":"comparison","jurisdiction":"unknown","clause_types":["Liability"],"strategy":"hybrid","reasoning":"Conflict analysis requires comparing specific clauses"}}
 
-Chat history:
-{chat_history}
+Constraints:
+- Use {mem0_context} to resolve entity references only
+- Do NOT infer missing legal facts
+- Keep reasoning under 15 words
+- If uncertain → default to hybrid (safer)
 
-Question:
-{question}
+Memory: {mem0_context}
+History: {chat_history}
+Query: {question}
 """
 
 
-REWRITER_PROMPT = """Rewrite the legal question for retrieval quality.
+REWRITER_PROMPT = """Rewrite for high-recall legal retrieval.
 
 Rules:
-- resolve pronouns using chat history.
-- expand legal abbreviations when useful.
-- add high-value synonyms without changing meaning.
-- keep concise (max 50 words).
-- output only the rewritten query text.
+1. Replace pronouns using chat history
+2. Normalize citations (e.g. Section 11 → Section 11 of Act)
+3. Add legal synonyms (termination → rescission, repudiation)
+4. Preserve jurisdiction and constraints
+5. Keep concise but complete
 
-Chat history:
-{chat_history}
+Output: single rewritten query only
 
-Original question:
-{question}
+History: {chat_history}
+Original: {question}
 """
 
 
-DECOMPOSER_PROMPT = """Decompose the legal question into 2-4 independent sub-queries.
+DECOMPOSER_PROMPT = """Decompose into atomic legal queries.
+
+Coverage:
+A. Definitions
+B. Governing laws/clauses
+C. Application/exceptions
 
 Rules:
-- each sub-query must stand alone.
-- preserve legal meaning and scope.
-- avoid overlap between sub-queries.
-- output strict JSON array of strings only.
+- Each query independently answerable
+- Include party-specific obligations if present
+- Max 5 queries
+- Output STRICT JSON array only
 
-Question:
-{question}
+Question: {question}
 """
 
 
-CRAG_EVALUATOR_PROMPT = """You are a retrieval quality evaluator.
+CRAG_EVALUATOR_PROMPT = """Evaluate retrieval sufficiency strictly.
 
-Given a user question and retrieved context, decide whether the context is sufficient to answer faithfully.
-
-Return strict JSON:
+Return JSON:
 {
-  "context_sufficient": true/false,
-  "reason": "short reason",
-  "missing_aspects": ["..."]
+  "status": "sufficient|partial|insufficient",
+  "gap_analysis": "missing legal element if applicable",
+  "confidence_score": 0.0
 }
 
-Question:
-{question}
+Rules:
+- "partial" if specific clause missing
+- "insufficient" if core legal basis missing
+- Do NOT assume missing info
+- Default to insufficient if uncertain
 
-Retrieved context:
-{context}
+Query: {question}
+Context: {context}
 """
 
 
-GENERATOR_PROMPT = """Answer the legal question using only the provided context.
+GENERATOR_PROMPT = """You are a Legal Associate.
+
+Answer ONLY using provided context.
 
 Rules:
-- do not invent facts.
-- include explicit citations with chunk ids in the form [chunk_id:...].
-- if context is insufficient, say so clearly.
-- keep legal language precise and concise.
+1. Every claim MUST include [chunk_id]
+2. If info missing → say: "The provided documents do not specify [X]"
+3. Do NOT infer, assume, or generalize beyond context
+4. Prefer specific clauses over general statements
+5. Keep answer precise and structured
+6. If core answer unsupported → refuse entire answer
+   If minor detail unsupported → omit that part only
+7. Max 150 words
 
-Question:
-{question}
+If insufficient context:
+→ Respond: "Insufficient information in provided documents."
 
-Context chunks:
-{context}
+Output: Clear, structured legal answer with citations only.
 
-Response:
+Question: {question}
+Context: {context}
+
+Answer:
 """
 
 
-HALLUCINATION_CHECKER_PROMPT = """You are a legal faithfulness checker.
+HALLUCINATION_CHECKER_PROMPT = """Audit answer grounding strictly.
 
-Validate whether the generated answer is fully grounded in the context.
-
-Return strict JSON:
+Return JSON:
 {
   "is_faithful": true/false,
-  "issues": ["..."],
-  "confidence": 0.0
+  "unsupported_claims": [],
+  "contradictions": [],
+  "citation_check": "valid|invalid|partial",
+  "action": "accept|reject|revise"
 }
 
-Question:
-{question}
+Rules:
+- Flag any claim not in context
+- Check logical reversals (unless/not)
+- Verify all chunk_ids exist and are accurate
+- Default to false if uncertain
+- reject if major unsupported claims found
+- revise if minor issues fixable
+- accept only if fully faithful
 
-Context:
-{context}
-
-Generated answer:
-{answer}
+Query: {question}
+Context: {context}
+Answer: {answer}
 """
 
 
-CYPHER_GENERATION_PROMPT = """You are a Neo4j Cypher query generator for a legal contract knowledge graph.
+CYPHER_GENERATION_PROMPT = """Generate optimized Neo4j Cypher for relationship queries.
 
-The graph schema:
-- Node labels: Entity (with properties: id, type, document_id, confidence)
-  - Entity types: Party, Contract, Clause, Obligation, Liability, PaymentTerm, Termination, Confidentiality, ServiceLevel
-- Relationship type: RELATES (with properties: type, document_id, confidence)
-  - Relationship types stored in 'type' property: HAS_CLAUSE, OWES_OBLIGATION, LIMITS_LIABILITY, TERMINATES, PAYS, PROVIDES_SERVICE
-- Document node: Document (with properties: id, doc_type, created_at)
-
-Rules:
-- Always use MATCH, never CREATE/DELETE/SET
-- Filter by document_id when provided: $document_id
-- Limit results to 20
-- Return meaningful aliases
-
-User question: {question}
-Document ID filter: {document_id}
-
-Cypher query:"""
-
-
-RESPONSE_GENERATION_PROMPT = """You are a legal contract analysis assistant. Answer the user's question based ONLY on the provided context. Cite sources using [Page X, Clause Y] format.
+Graph Schema:
+- Node: Entity (id, type, document_id, chunk_id)
+  Types: Party, Clause, Obligation, Right, Payment, Service
+- Relationship: RELATES (type, document_id)
+  Types: HAS_CLAUSE, OWES_OBLIGATION, LIMITS_LIABILITY, TERMINATES, PAYS, PROVIDES_SERVICE
 
 Rules:
-- Answer ONLY from the provided context and never fabricate information
-- If the context does not contain the answer, say "I could not find this information in the uploaded documents."
-- Use precise legal language
-- When referencing specific provisions, cite clause number and page
-- For obligations, clearly state which party is obligated
-- For monetary values or deadlines, quote them exactly
-- Structure complex answers with bullet points
+- Always MATCH, never CREATE/DELETE
+- Filter by document_id = {document_id}
+- Return chunk_ids for bridge layer
+- Limit 20
+- Use ONLY schema-defined nodes and relationships
+- If query cannot be mapped to schema → return empty
 
-Context from vector search:
-{vector_context}
+Question: {question}
+Document: {document_id}
 
-Context from knowledge graph:
-{graph_context}
-
-Chat history:
-{chat_history}
-
-User question: {question}
-
-Answer:"""
+Cypher:
+"""
 
 
-HALLUCINATION_GRADE_PROMPT = """You are a legal accuracy checker. Given a generated answer and the source context it was derived from, determine if the answer is faithful to the sources.
+RESPONSE_GENERATION_PROMPT = """Answer using context only. Refusal behavior critical.
+
+Rules:
+1. Every claim must have [chunk_id]
+2. Missing info → "The documents do not specify [X]"
+3. No inference, assumption, or generalization
+4. Prioritize specific clauses over general rules
+5. Structure with bullet points for clarity
+6. Max 150 words
+7. If core answer unsupported → refuse entirely
+   If minor detail unsupported → omit that part
+
+If context insufficient:
+→ "Insufficient information in provided documents."
+
+Output: Clear, structured legal answer with citations only.
+
+Question: {question}
+Context: {context}
+
+Answer:
+"""
+
+
+HALLUCINATION_GRADE_PROMPT = """Grade answer faithfulness aggressively.
+
+Return JSON:
+{
+  \"is_faithful\": true/false,
+  \"confidence\": 0.0-1.0,
+  \"issues\": [\"unsupported claim\", ...]
+}
 
 Check for:
-1. Claims not supported by any source chunk
-2. Misquoted values (amounts, dates, percentages)
-3. Attributed obligations to the wrong party
-4. Invented clause numbers or section references
+- Claims not in context
+- Misquoted values/dates
+- Wrong party attribution
+- Invented references
 
-Source context:
-{context}
-
-Generated answer:
-{answer}
-
-Respond with JSON:
-{{
-  "is_faithful": true/false,
-  "confidence": 0.0-1.0,
-  "issues": ["list of specific problems found, or empty"]
-}}"""
+Query: {question}
+Context: {context}
+Answer: {answer}
+"""
 
 
-RESPONSE_REFINEMENT_PROMPT = """You are a legal accuracy editor. The initial answer had factual issues when checked against the source context. Rewrite the answer to fix these problems.
+RESPONSE_REFINEMENT_PROMPT = """Fix faithfulness issues in answer.
 
-Issues found:
-{issues}
+Rules:
+- Preserve structure
+- Replace unsupported claims
+- Re-ground all warranties in context
+- Keep response length
 
-Source context:
-{context}
+Issues: {issues}
+Context: {context}
+Original: {answer}
+Query: {question}
 
-Original answer:
-{answer}
-
-User question: {question}
-
-Corrected answer:"""
+Corrected:
+"""
 
 
 # Compatibility aliases for older naming.

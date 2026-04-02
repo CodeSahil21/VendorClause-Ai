@@ -1,8 +1,10 @@
 from typing import Literal, TypedDict
 
 
-IntentType = Literal["factual", "comparison", "risk", "obligation", "definition", "summarization"]
+IntentType = Literal["factual", "comparison", "risk", "obligation", "procedural", "statutory_interpretation"]
 StrategyType = Literal["vector_only", "hybrid", "graph_only"]
+JurisdictionType = Literal["federal", "state", "international", "unknown"]
+CRAGStatusType = Literal["sufficient", "partial", "insufficient"]
 
 
 class RetrievalState(TypedDict, total=False):
@@ -21,6 +23,7 @@ class RetrievalState(TypedDict, total=False):
 
     # Supervisor output
     intent: IntentType
+    jurisdiction: JurisdictionType
     clause_types: list[str]
     entities: list[str]
     strategy: StrategyType
@@ -37,6 +40,7 @@ class RetrievalState(TypedDict, total=False):
     # Fusion and evaluation
     fused_chunks: list[dict]
     crag_iteration: int
+    crag_status: CRAGStatusType
     context_sufficient: bool
 
     # Generation
