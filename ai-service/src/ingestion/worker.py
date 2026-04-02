@@ -15,7 +15,7 @@ import boto3
 from bullmq import Worker as BullMQWorker
 from redis import Redis
 
-from src.ingestion.ingestion_service import LegalRAGIngestion
+from src.ingestion.pipeline import LegalRAGIngestion
 from src.shared.database_service import DatabaseService
 from src.shared.langfuse_config import trace_ingestion, update_trace
 from src.shared.settings import settings
