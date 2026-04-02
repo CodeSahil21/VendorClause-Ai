@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     langfuse_host: str = "http://localhost:3040"
     langfuse_base_url: str = "http://localhost:3040"
 
+    # MCP servers
+    qdrant_mcp_url: str = "http://localhost:8001"
+    neo4j_mcp_url: str = "http://localhost:8002"
+
+    # mem0
+    mem0_api_key: str = ""
+
     class Config:
         env_file = ".env"
         case_sensitive = False
