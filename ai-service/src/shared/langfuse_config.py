@@ -145,8 +145,13 @@ def trace_ingestion(name: str = "ingestion"):
     return _noop
 
 
-def trace_query(name: str = "query"):
-    """Same as trace_ingestion but for query pipeline entry points."""
+def trace_retrieval(name: str = "retrieval"):
+    """Same as trace_ingestion but for retrieval pipeline entry points."""
     if _observe:
         return _observe(name=name)
     return _noop
+
+
+def trace_query(name: str = "query"):
+    """Backward-compatible alias for older query pipeline naming."""
+    return trace_retrieval(name=name)
