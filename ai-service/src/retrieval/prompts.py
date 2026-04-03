@@ -5,13 +5,14 @@ SUPERVISOR_PROMPT = """You are a Legal Retrieval Router.
 Task: Classify query and select optimal retrieval strategy.
 
 Output STRICT JSON only:
-{
+{{
   "intent": "factual|comparison|risk|obligation|procedural|statutory_interpretation",
   "jurisdiction": "federal|state|international|unknown",
   "clause_types": [],
+  "entities": ["<party or clause name>", "..."],
   "strategy": "vector_only|hybrid|graph_only",
   "reasoning": "<15 words"
-}
+}}
 
 Decision Rules:
 - graph_only: relationships between entities (e.g., "who owes what")
@@ -20,13 +21,15 @@ Decision Rules:
 
 Few-shot Example:
 Q: "Does Section 4 conflict with liability cap?"
-A: {{"intent":"comparison","jurisdiction":"unknown","clause_types":["Liability"],"strategy":"hybrid","reasoning":"Conflict analysis requires comparing specific clauses"}}
+A: {{"intent":"comparison","jurisdiction":"unknown","clause_types":["Liability"],"entities":["section 4","liability cap"],"strategy":"hybrid","reasoning":"Conflict analysis requires comparing specific clauses"}}
 
 Constraints:
-- Use {mem0_context} to resolve entity references only
+- Use {{mem0_context}} to resolve entity references only
 - Do NOT infer missing legal facts
 - Keep reasoning under 15 words
 - If uncertain → default to hybrid (safer)
+- ALWAYS include the "entities" key in JSON output
+- For graph_only or hybrid, include relevant entities when present; otherwise return []
 
 Memory: {mem0_context}
 History: {chat_history}
@@ -61,7 +64,9 @@ Rules:
 - Each query independently answerable
 - Include party-specific obligations if present
 - Max 5 queries
-- Output STRICT JSON array only
+- Output STRICT JSON array of plain strings only — no objects, no keys
+
+Example output: ["query one", "query two", "query three"]
 
 Question: {question}
 """
