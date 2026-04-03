@@ -33,7 +33,8 @@ class Settings(BaseSettings):
     qdrant_mcp_url: str = "http://localhost:8001"
     neo4j_mcp_url: str = "http://localhost:8002"
     qdrant_collection_name: str = "legal_contracts_hybrid"
-    mcp_auth_key: str = ""
+    cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    mcp_auth_key: str
 
     # mem0
     mem0_api_key: str = ""

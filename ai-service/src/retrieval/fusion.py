@@ -13,7 +13,7 @@ def _get_cross_encoder() -> Any:
             from sentence_transformers import CrossEncoder
         except Exception as exc:
             raise RuntimeError("sentence-transformers is required for rerank()") from exc
-        _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+        _cross_encoder = CrossEncoder(settings.cross_encoder_model)
     return _cross_encoder
 
 
