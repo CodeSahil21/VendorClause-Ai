@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     # MCP servers
     qdrant_mcp_url: str = "http://localhost:8001"
     neo4j_mcp_url: str = "http://localhost:8002"
+    qdrant_collection_name: str = "legal_contracts_hybrid"
     mcp_auth_key: str = ""
 
     # mem0
