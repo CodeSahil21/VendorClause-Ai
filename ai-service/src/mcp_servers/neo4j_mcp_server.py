@@ -15,8 +15,9 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -45,6 +46,10 @@ class Neo4jMCPServer:
         if relationship_types is None:
             relationship_types = []
 
+        # Validate and clamp depth before interpolating into Cypher.
+        # Neo4j does not support parameterized variable-length path lengths.
+        depth = max(1, min(int(depth), 5))  # Clamp to 1-5
+
         logger.info(
             f"Graph traverse: entities={entity_names}, doc={document_id}, "
             f"rel_types={relationship_types}, depth={depth}"
@@ -56,9 +61,6 @@ class Neo4jMCPServer:
             async with self.neo4j.driver.session() as session:
                 normalized_names = [self.neo4j.normalize_entity(n) for n in entity_names]
 
-                # Use generic relationship pattern — ingestion stores typed edges
-                # (HAS_CLAUSE, OWES_PAYMENT etc.), not a generic RELATES type.
-                # rel_types passed as Cypher parameter to avoid injection.
                 cypher = f"""
                 MATCH (e:Entity {{document_id: $doc_id}})
                 WHERE e.id IN $entity_names
@@ -73,16 +75,23 @@ class Neo4jMCPServer:
                 LIMIT 50
                 """
 
-                query_result = await session.run(
-                    cypher,
-                    {
-                        "doc_id": document_id,
-                        "entity_names": normalized_names,
-                        "rel_types": relationship_types,
-                    },
-                )
-
-                records = await query_result.data()
+                try:
+                    query_result = await asyncio.wait_for(
+                        session.run(
+                            cypher,
+                            {
+                                "doc_id": document_id,
+                                "entity_names": normalized_names,
+                                "rel_types": relationship_types,
+                                "depth": depth,  # Now parameterized
+                            },
+                        ),
+                        timeout=30,
+                    )
+                    records = await query_result.data()
+                except asyncio.TimeoutError:
+                    logger.error(f"Graph traverse timeout for {entity_names}")
+                    raise
 
                 for record in records:
                     results.append({
@@ -96,7 +105,8 @@ class Neo4jMCPServer:
                 logger.info(f"Graph traverse found {len(results)} connections")
 
         except Exception as e:
-            logger.error(f"Graph traverse error: {e}")
+            logger.error(f"Graph traverse error: {e}", exc_info=True)
+            raise
 
         return results
 
@@ -164,6 +174,42 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Neo4j MCP Server", lifespan=lifespan)
 server = Neo4jMCPServer()
 
+# CORS middleware — restrict to local AI service and Gateway only
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost", "http://localhost:3000"],  # Gateway/client
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
+
+
+async def verify_auth(request: Request):
+    """Simple auth middleware: check X-API-Key header.
+    
+    In production, validate against real API key store.
+    For now, localhost can bypass; remote requests need header.
+    """
+    client_host = request.client.host if request.client else "unknown"
+    if client_host not in ("127.0.0.1", "localhost"):
+        api_key = request.headers.get("X-API-Key")
+        expected_key = settings.mcp_auth_key
+        if not expected_key:
+            raise HTTPException(status_code=503, detail="MCP auth key is not configured")
+        if not api_key or api_key != expected_key:
+            raise HTTPException(status_code=403, detail="Unauthorized")
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Apply auth to /messages endpoint."""
+    if request.url.path == "/messages":
+        try:
+            await verify_auth(request)
+        except HTTPException as e:
+            return JSONResponse(status_code=e.status_code, content={"success": False, "error": str(e.detail)})
+    return await call_next(request)
+
 
 @app.get("/sse")
 async def sse_connect():
@@ -186,20 +232,30 @@ async def handle_messages(request: dict):
     tool_name = request.get("tool")
     params = request.get("params", {})
 
+    if not tool_name:
+        return {"success": False, "error": "Missing 'tool' field"}
+
     logger.info(f"Tool call: {tool_name} with params={params}")
 
     try:
         if tool_name == "graph_traverse":
+            if not params.get("entity_names") or not params.get("document_id"):
+                return {"success": False, "error": "Missing required params: entity_names, document_id"}
             results = await server.graph_traverse(**params)
         elif tool_name == "extract_entity":
+            if not params.get("entity_name") or not params.get("document_id"):
+                return {"success": False, "error": "Missing required params: entity_name, document_id"}
             results = await server.extract_entity(**params)
         else:
-            raise ValueError(f"Unknown tool: {tool_name}")
+            return {"success": False, "error": f"Unknown tool: {tool_name}"}
 
         return {"success": True, "results": results}
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout in {tool_name}")
+        return {"success": False, "error": "Request timeout", "tool": tool_name}
     except Exception as e:
-        logger.error(f"Error in {tool_name}: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error in {tool_name}: {e}", exc_info=True)
+        return {"success": False, "error": str(e), "tool": tool_name}
 
 
 @app.get("/health")

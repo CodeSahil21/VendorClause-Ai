@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     # MCP servers
     qdrant_mcp_url: str = "http://localhost:8001"
     neo4j_mcp_url: str = "http://localhost:8002"
+    mcp_auth_key: str = ""
 
     # mem0
     mem0_api_key: str = ""
