@@ -321,7 +321,7 @@ async def handle_messages(request: dict):
     """
     tool_name = request.get("tool")
     params = request.get("params", {})
-    results = []  # Initialize results to avoid reference before assignment
+    results = []  # Initialize results to avoid reference before assignment*/
 
     if not tool_name:
         return {"success": False, "error": "Missing 'tool' field"}
