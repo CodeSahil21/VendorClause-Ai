@@ -100,7 +100,7 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null });
         try {
           const user = await authApi.getProfile();
-          set({ user, isLoading: false });
+          set({ user, isAuthenticated: true, isLoading: false });
         } catch (error) {
           set({ error: (error as Error).message, isLoading: false });
           throw error;

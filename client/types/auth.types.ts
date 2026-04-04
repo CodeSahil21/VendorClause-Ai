@@ -3,12 +3,14 @@ export interface User {
   id: string;
   email: string;
   name: string | null;
+  createdAt?: string;
 }
 
 export interface UserProfileResponse {
   id: string;
   email: string;
   name: string | null;
+  createdAt: string;
 }
 
 export interface AuthResponse {
@@ -18,7 +20,7 @@ export interface AuthResponse {
     name: string | null;
     createdAt?: string;
   };
-  token: string;
+  token: string | null;
 }
 
 // Request DTOs (matching backend schemas)
@@ -66,7 +68,7 @@ export interface ApiErrorResponse {
   success: false;
   statusCode: number;
   message: string;
-  errors?: any[];
+  errors?: { field?: string; message?: string }[];
   timestamp: string;
   path: string;
 }

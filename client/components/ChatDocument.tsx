@@ -1,78 +1,96 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Send, FileText, Download, ExternalLink } from 'lucide-react';
 import { useSocket } from '@/context/SocketContext';
+import { sessionApi } from '@/api';
 
 interface ChatDocumentProps {
-  documentId: string;
+  sessionId: string;
   fileName: string;
-  s3Url: string;
+  fileUrl: string | null;
 }
 
-const transformS3Url = (url: string): string => {
-  if (!url) return '';
-  if (url.startsWith('minio://')) {
-    const path = url.replace('minio://', '');
-    return `http://localhost:9000/${path}`;
-  }
-  if (url.startsWith('s3://')) {
-    const path = url.replace('s3://', '');
-    return `http://localhost:9000/${path}`;
-  }
-  return url;
-};
-
-export default function ChatDocument({ documentId, fileName, s3Url }: ChatDocumentProps) {
+export default function ChatDocument({ sessionId, fileName, fileUrl }: ChatDocumentProps) {
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [streamingText, setStreamingText] = useState('');
+  const streamingTextRef = useRef('');
   const { socket } = useSocket();
-  const pdfUrl = transformS3Url(s3Url);
+  const pdfUrl = fileUrl || '';
 
   useEffect(() => {
     if (!socket) return;
 
     if (socket.connected) {
-      socket.emit('join-chat', documentId);
+      socket.emit('join-session', sessionId);
     }
 
-    const handleConnect = () => socket.emit('join-chat', documentId);
+    const handleConnect = () => socket.emit('join-session', sessionId);
 
-    const handleResponse = (data: { response: string; citations?: string[] }) => {
-      setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
+    const handleToken = (data: { token?: string }) => {
+      if (!data?.token) return;
+      streamingTextRef.current += data.token;
+      setStreamingText(prev => prev + data.token);
+    };
+
+    const handleDone = (data: { message?: string }) => {
+      const finalText = (data?.message || streamingTextRef.current || '').trim();
+      streamingTextRef.current = '';
+      if (finalText) {
+        setMessages(prev => [...prev, { role: 'assistant', content: finalText }]);
+      }
+      setStreamingText('');
       setIsLoading(false);
     };
 
-    const handleError = (data: { error: string }) => {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${data.error}` }]);
+    const handleSources = (_data: { sources?: Array<{ chunk_id?: string }> }) => {
+      // Sources are emitted for citations UI; no-op for now to avoid breaking flow.
+    };
+
+    const handleError = (data: { message?: string; error?: string }) => {
+      const errorText = data?.message || data?.error || 'Unknown error';
+      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${errorText}` }]);
+      setStreamingText('');
       setIsLoading(false);
     };
 
     socket.on('connect', handleConnect);
-    socket.on('query:response', handleResponse);
-    socket.on('query:error', handleError);
+    socket.on('stream:token', handleToken);
+    socket.on('stream:done', handleDone);
+    socket.on('stream:sources', handleSources);
+    socket.on('stream:error', handleError);
 
     return () => {
-      socket.emit('leave-chat', documentId);
+      socket.emit('leave-session', sessionId);
       socket.off('connect', handleConnect);
-      socket.off('query:response', handleResponse);
-      socket.off('query:error', handleError);
+      socket.off('stream:token', handleToken);
+      socket.off('stream:done', handleDone);
+      socket.off('stream:sources', handleSources);
+      socket.off('stream:error', handleError);
     };
-  }, [documentId, socket]);
+  }, [sessionId, socket]);
 
-  const handleSendMessage = () => {
-    if (!input.trim() || !socket?.connected) return;
+  const handleSendMessage = async () => {
+    if (!input.trim()) return;
 
     const userMessage = input;
     setInput('');
+    streamingTextRef.current = '';
+    setStreamingText('');
     setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setIsLoading(true);
 
-    socket.emit('query:document', {
-      documentId,
-      query: userMessage
-    });
+    try {
+      await sessionApi.querySession(sessionId, userMessage);
+    } catch (error) {
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', content: `Error: ${(error as Error).message}` },
+      ]);
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -166,11 +184,15 @@ export default function ChatDocument({ documentId, fileName, s3Url }: ChatDocume
             {isLoading && (
               <div className="flex justify-start">
                 <div className="bg-gray-100 text-gray-900 px-4 py-2 rounded-lg">
-                  <div className="flex gap-1">
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
-                  </div>
+                  {streamingText ? (
+                    <p className="text-sm whitespace-pre-wrap">{streamingText}</p>
+                  ) : (
+                    <div className="flex gap-1">
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                    </div>
+                  )}
                 </div>
               </div>
             )}

@@ -11,7 +11,7 @@ interface ProcessingDocumentProps {
 }
 
 export default function ProcessingDocument({ jobId, onComplete, onError }: ProcessingDocumentProps) {
-  const { status, documentId, error } = useJobStatus(jobId);
+  const { status, documentId, error, progress, stage } = useJobStatus(jobId);
 
   useEffect(() => {
     if (status === 'COMPLETED' && documentId) {
@@ -30,7 +30,7 @@ export default function ProcessingDocument({ jobId, onComplete, onError }: Proce
       case 'QUEUED':
         return 'Queuing document for processing...';
       case 'IN_PROGRESS':
-        return 'Processing your document...';
+        return stage ? `Processing stage: ${stage.replaceAll('_', ' ')}` : 'Processing your document...';
       default:
         return 'Please wait...';
     }
@@ -48,13 +48,13 @@ export default function ProcessingDocument({ jobId, onComplete, onError }: Proce
           <div className="mt-8 w-full max-w-md">
             <div className="w-full bg-gray-200 rounded-full h-2">
               <div 
-                className="bg-indigo-600 h-2 rounded-full animate-pulse" 
-                style={{ width: status === 'IN_PROGRESS' ? '70%' : '30%' }} 
+                className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${Math.max(0, Math.min(100, progress || (status === 'QUEUED' ? 5 : 0)))}%` }}
               />
             </div>
           </div>
           <p className="mt-4 text-sm text-gray-500">
-            Status: {status === 'QUEUED' ? 'Queued' : 'Processing'}
+            Status: {status === 'QUEUED' ? 'Queued' : 'Processing'} ({Math.max(0, Math.min(100, progress || (status === 'QUEUED' ? 5 : 0)))}%)
           </p>
         </div>
       </div>

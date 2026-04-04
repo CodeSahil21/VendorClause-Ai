@@ -53,7 +53,7 @@ export default function SessionPage() {
     getSessionById(sessionId).catch(() => {});
   }, [setCurrentJobId, sessionId, getSessionById]);
 
-  const handleProcessingComplete = useCallback((documentId: string) => {
+  const handleProcessingComplete = useCallback((_documentId: string) => {
     setLocalJobId(null);
     getSessionById(sessionId).catch(() => {});
   }, [sessionId, getSessionById]);
@@ -89,9 +89,9 @@ export default function SessionPage() {
   if (currentSession.document?.status === 'READY') {
     return (
       <ChatDocument
-        documentId={currentSession.document.id}
+        sessionId={sessionId}
         fileName={currentSession.document.fileName}
-        s3Url={currentSession.document.s3Url}
+        fileUrl={currentSession.document.fileUrl}
       />
     );
   }

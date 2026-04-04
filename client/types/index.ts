@@ -14,10 +14,13 @@ export type {
 } from './auth.types';
 
 export type {
-  Session,
   CreateSessionDto,
   UpdateSessionDto,
   SessionResponse,
+  SessionWithDocumentResponse,
   SessionsListResponse,
-  DeleteSessionResponse,
+  QuerySessionResponse,
+  DocumentInfo,
+  JobInfo,
+  DocumentUploadResponse,
 } from './session.types';

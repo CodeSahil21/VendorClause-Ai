@@ -29,7 +29,6 @@ export function AuthInitializer({ children }: { children: React.ReactNode }) {
     if (!isHydrated) return;
 
     const initAuth = async () => {
-      // If user data exists in store, we're authenticated
       if (isAuthenticated) {
         if (isPublicPath) {
           router.replace('/');
@@ -37,20 +36,17 @@ export function AuthInitializer({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Try to get profile from cookie (on refresh)
       if (!isPublicPath) {
         try {
           await getProfile();
-          // If successful, stay on current page
-        } catch (error) {
-          // If failed, redirect to login
+        } catch {
           router.replace('/login');
         }
       }
     };
 
     initAuth();
-  }, [isHydrated, isAuthenticated, isPublicPath, pathname]);
+  }, [isHydrated, isAuthenticated, isPublicPath, pathname, getProfile, router]);
 
   if (!isHydrated) {
     return (

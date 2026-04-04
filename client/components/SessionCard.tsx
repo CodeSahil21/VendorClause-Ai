@@ -1,9 +1,9 @@
 'use client';
 
-import { Session } from '@/types';
+import { SessionResponse } from '@/types';
 
 interface SessionCardProps {
-  session: Session;
+  session: SessionResponse;
   onDelete: (sessionId: string, e: React.MouseEvent) => void;
   onClick: (sessionId: string) => void;
 }

@@ -16,20 +16,16 @@ export interface DocumentInfo {
   sessionId: string;
   userId: string;
   fileName: string;
-  s3Url: string;
+  fileUrl: string | null;
   status: string;
   createdAt: string;
+  updatedAt: string;
+  statusUpdatedAt?: string | null;
   jobs?: JobInfo[];
 }
 
-// Session Types
-export interface Session {
-  id: string;
-  userId: string;
-  title: string;
-  createdAt: string;
-  updatedAt: string;
-  document?: DocumentInfo | null;
+export interface JobWithDocumentInfo extends JobInfo {
+  document: Pick<DocumentInfo, 'id' | 'userId' | 'fileName' | 'status'>;
 }
 
 // Request DTOs
@@ -41,14 +37,18 @@ export interface UpdateSessionDto {
   title: string;
 }
 
-// Response Types
+// Response Types — base (create/update/list)
 export interface SessionResponse {
   id: string;
   userId: string;
   title: string;
   createdAt: string;
   updatedAt: string;
-  document?: DocumentInfo | null;
+}
+
+// Response Type — getSessionById (includes document)
+export interface SessionWithDocumentResponse extends SessionResponse {
+  document: DocumentInfo | null;
 }
 
 export interface SessionsListResponse {
@@ -61,6 +61,12 @@ export interface SessionsListResponse {
   };
 }
 
-export interface DeleteSessionResponse {
-  message: string;
+export interface DocumentUploadResponse {
+  document: DocumentInfo;
+  job: JobInfo;
+}
+
+export interface QuerySessionResponse {
+  queued: boolean;
+  sessionId: string;
 }

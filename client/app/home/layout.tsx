@@ -15,7 +15,7 @@ export default function HomeLayout({ children }: { children: React.ReactNode }) 
       await logout();
       toast.success('Logged out successfully');
       router.push('/login');
-    } catch (err) {
+    } catch {
       toast.error('Logout failed');
     }
   };
@@ -35,7 +35,7 @@ export default function HomeLayout({ children }: { children: React.ReactNode }) 
             {/* Left - Logo */}
             <div className="flex items-center space-x-3 group cursor-pointer">
               <div className="relative">
-                <Image src="/APP.png" alt="VendorClause AI" width={40} height={40} className="rounded-full ring-2 ring-indigo-100 group-hover:ring-indigo-300 transition-all" />
+                <Image src="/App.png" alt="VendorClause AI" width={40} height={40} className="rounded-full ring-2 ring-indigo-100 group-hover:ring-indigo-300 transition-all" />
                 <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white animate-pulse"></div>
               </div>
               <div>

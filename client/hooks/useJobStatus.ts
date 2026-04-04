@@ -9,11 +9,22 @@ interface JobStatusData {
   timestamp: string;
 }
 
+interface JobProgressData {
+  event: 'job:progress';
+  jobId: string;
+  documentId: string;
+  status: 'IN_PROGRESS' | 'COMPLETED';
+  progress: number;
+  stage: string;
+}
+
 export function useJobStatus(jobId: string | null) {
   const { socket } = useSocket();
   const [status, setStatus] = useState<JobStatusData['status']>('QUEUED');
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<number>(0);
+  const [stage, setStage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!jobId?.trim() || !socket) return;
@@ -31,25 +42,33 @@ export function useJobStatus(jobId: string | null) {
       setStatus(data.status);
       if (data.documentId) setDocumentId(data.documentId);
       if (data.error) setError(data.error);
+
+      if (data.status === 'IN_PROGRESS') {
+        setProgress(prev => (prev > 0 ? prev : 5));
+      }
+      if (data.status === 'COMPLETED') {
+        setProgress(100);
+      }
     };
 
-    const handleComplete = (data: { documentId: string; jobId: string }) => {
+    const handleJobProgress = (data: JobProgressData) => {
       if (data.jobId !== jobId) return;
-      setStatus('COMPLETED');
-      setDocumentId(data.documentId);
+      setProgress(data.progress);
+      setStage(data.stage);
+      if (data.documentId) setDocumentId(data.documentId);
     };
 
     socket.on('connect', handleConnect);
     socket.on('job:status', handleJobStatus);
-    socket.on('ingestion:complete', handleComplete);
+    socket.on('job:progress', handleJobProgress);
 
     return () => {
       socket.emit('leave', jobId);
       socket.off('connect', handleConnect);
       socket.off('job:status', handleJobStatus);
-      socket.off('ingestion:complete', handleComplete);
+      socket.off('job:progress', handleJobProgress);
     };
   }, [jobId, socket]);
 
-  return { status, documentId, error };
+  return { status, documentId, error, progress, stage };
 }

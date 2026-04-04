@@ -15,7 +15,7 @@ export const authApi = {
   register: async (data: RegisterDto): Promise<AuthResponse> => {
     try {
       const response = await axiosInstance.post<ApiSuccessResponse<{ user: UserProfileResponse }>>('/auth/register', data);
-      return { user: response.data.data.user, token: '' };
+      return { user: response.data.data.user, token: null };
     } catch (error) {
       throw new Error(handleAxiosError(error, 'Registration failed'));
     }
@@ -24,7 +24,7 @@ export const authApi = {
   login: async (data: LoginDto): Promise<AuthResponse> => {
     try {
       const response = await axiosInstance.post<ApiSuccessResponse<{ user: UserProfileResponse }>>('/auth/login', data);
-      return { user: response.data.data.user, token: '' };
+      return { user: response.data.data.user, token: null };
     } catch (error) {
       throw new Error(handleAxiosError(error, 'Login failed'));
     }

@@ -1,10 +1,10 @@
 import { create } from 'zustand';
-import type { Session, CreateSessionDto, UpdateSessionDto } from '../../types';
+import type { SessionResponse, SessionWithDocumentResponse, CreateSessionDto, UpdateSessionDto } from '../../types';
 import { sessionApi } from '../../api';
 
 interface SessionState {
-  sessions: Session[];
-  currentSession: Session | null;
+  sessions: SessionResponse[];
+  currentSession: SessionWithDocumentResponse | null;
   pagination: {
     page: number;
     limit: number;
@@ -16,12 +16,12 @@ interface SessionState {
 }
 
 interface SessionStore extends SessionState {
-  createSession: (data: CreateSessionDto) => Promise<Session>;
+  createSession: (data: CreateSessionDto) => Promise<SessionResponse>;
   getUserSessions: (page?: number, limit?: number) => Promise<void>;
   getSessionById: (sessionId: string) => Promise<void>;
-  updateSession: (sessionId: string, data: UpdateSessionDto) => Promise<Session>;
+  updateSession: (sessionId: string, data: UpdateSessionDto) => Promise<SessionResponse>;
   deleteSession: (sessionId: string) => Promise<void>;
-  setCurrentSession: (session: Session | null) => void;
+  setCurrentSession: (session: SessionWithDocumentResponse | null) => void;
   clearError: () => void;
 }
 
@@ -38,7 +38,7 @@ export const useSessionStore = create<SessionStore>()((set) => ({
       const session = await sessionApi.createSession(data);
       set((state) => ({ 
         sessions: [session, ...state.sessions],
-        currentSession: session,
+        currentSession: { ...session, document: null },
         isLoading: false 
       }));
       return session;
@@ -80,7 +80,9 @@ export const useSessionStore = create<SessionStore>()((set) => ({
       const updatedSession = await sessionApi.updateSession(sessionId, data);
       set((state) => ({
         sessions: state.sessions.map((s) => s.id === sessionId ? updatedSession : s),
-        currentSession: state.currentSession?.id === sessionId ? updatedSession : state.currentSession,
+        currentSession: state.currentSession?.id === sessionId
+          ? { ...state.currentSession, ...updatedSession }
+          : state.currentSession,
         isLoading: false
       }));
       return updatedSession;

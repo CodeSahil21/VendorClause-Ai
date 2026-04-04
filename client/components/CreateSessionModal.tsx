@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 interface CreateSessionModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (sessionId: string) => void;
+  onSuccess: () => void;
   createSession: (data: { title: string }) => Promise<{ id: string }>;
 }
 
@@ -29,7 +29,7 @@ export default function CreateSessionModal({ isOpen, onClose, onSuccess, createS
       toast.success('Session created successfully');
       setTitle('');
       onClose();
-      onSuccess(session.id);
+      onSuccess();
     } catch (error) {
       toast.error((error as Error).message);
     } finally {

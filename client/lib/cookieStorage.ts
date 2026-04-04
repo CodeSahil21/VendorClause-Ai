@@ -1,4 +1,4 @@
-import { PersistStorage } from 'zustand/middleware';
+import { PersistStorage, StorageValue } from 'zustand/middleware';
 
 const getCookie = (name: string): string | null => {
   if (typeof document === 'undefined') return null;
@@ -19,12 +19,18 @@ const removeCookie = (name: string) => {
   document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
 };
 
-export const cookieStorage: PersistStorage<any> = {
-  getItem: (name: string) => {
+export const cookieStorage: PersistStorage<unknown> = {
+  getItem: (name: string): StorageValue<unknown> | null => {
     const value = getCookie(name);
-    return value ? JSON.parse(value) : null;
+    if (!value) return null;
+    try {
+      return JSON.parse(value) as StorageValue<unknown>;
+    } catch {
+      removeCookie(name);
+      return null;
+    }
   },
-  setItem: (name: string, value: any) => {
+  setItem: (name: string, value: StorageValue<unknown>) => {
     setCookie(name, JSON.stringify(value), 7);
   },
   removeItem: (name: string) => {

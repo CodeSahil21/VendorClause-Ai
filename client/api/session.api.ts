@@ -4,8 +4,9 @@ import type {
   CreateSessionDto, 
   UpdateSessionDto, 
   SessionResponse, 
+  SessionWithDocumentResponse,
   SessionsListResponse,
-  DeleteSessionResponse
+  QuerySessionResponse
 } from "@/types/session.types";
 import type { ApiSuccessResponse } from "@/types/auth.types";
 
@@ -30,9 +31,9 @@ export const sessionApi = {
     }
   },
 
-  getSessionById: async (sessionId: string): Promise<SessionResponse> => {
+  getSessionById: async (sessionId: string): Promise<SessionWithDocumentResponse> => {
     try {
-      const response = await axiosInstance.get<ApiSuccessResponse<SessionResponse>>(`/sessions/${sessionId}`);
+      const response = await axiosInstance.get<ApiSuccessResponse<SessionWithDocumentResponse>>(`/sessions/${sessionId}`);
       return response.data.data;
     } catch (error) {
       throw new Error(handleAxiosError(error, 'Failed to fetch session'));
@@ -48,12 +49,23 @@ export const sessionApi = {
     }
   },
 
-  deleteSession: async (sessionId: string): Promise<DeleteSessionResponse> => {
+  deleteSession: async (sessionId: string): Promise<void> => {
     try {
-      const response = await axiosInstance.delete<ApiSuccessResponse<DeleteSessionResponse>>(`/sessions/${sessionId}`);
-      return response.data.data;
+      await axiosInstance.delete(`/sessions/${sessionId}`);
     } catch (error) {
       throw new Error(handleAxiosError(error, 'Failed to delete session'));
+    }
+  },
+
+  querySession: async (sessionId: string, question: string): Promise<QuerySessionResponse> => {
+    try {
+      const response = await axiosInstance.post<ApiSuccessResponse<QuerySessionResponse>>(
+        `/sessions/${sessionId}/query`,
+        { question }
+      );
+      return response.data.data;
+    } catch (error) {
+      throw new Error(handleAxiosError(error, 'Failed to submit query'));
     }
   },
 };

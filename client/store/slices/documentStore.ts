@@ -1,34 +1,10 @@
 import { create } from 'zustand';
 import { documentApi } from '../../api';
-
-interface DocumentResponse {
-  id: string;
-  sessionId: string;
-  userId: string;
-  fileName: string;
-  s3Url: string;
-  status: string;
-  createdAt: string;
-}
-
-interface JobResponse {
-  id: string;
-  documentId: string;
-  taskType: string;
-  status: string;
-  error: string | null;
-  startedAt: string | null;
-  completedAt: string | null;
-  createdAt: string;
-}
-
-interface DocumentWithJobs extends DocumentResponse {
-  jobs: JobResponse[];
-}
+import type { DocumentInfo, JobInfo, DocumentUploadResponse } from '../../types/session.types';
 
 interface DocumentState {
-  documents: DocumentResponse[];
-  currentDocument: DocumentWithJobs | null;
+  documents: DocumentInfo[];
+  currentDocument: DocumentInfo | null;
   uploadProgress: number;
   isUploading: boolean;
   isLoading: boolean;
@@ -37,7 +13,7 @@ interface DocumentState {
 }
 
 interface DocumentStore extends DocumentState {
-  uploadDocument: (sessionId: string, file: File) => Promise<{ document: DocumentResponse; job: JobResponse }>;
+  uploadDocument: (sessionId: string, file: File) => Promise<DocumentUploadResponse>;
   getDocument: (documentId: string) => Promise<void>;
   deleteDocument: (documentId: string) => Promise<void>;
   clearError: () => void;
