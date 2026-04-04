@@ -1,8 +1,9 @@
 import { prisma } from '../lib/prisma';
 import { ApiError } from '../utils/apiError';
+import { JobWithDocumentResponse } from '../types/session.types';
 
 export class JobService {
-  static async getJobById(jobId: string, userId: string) {
+  static async getJobById(jobId: string, userId: string): Promise<JobWithDocumentResponse> {
     const job = await prisma.job.findFirst({
       where: { id: jobId },
       include: {
@@ -21,7 +22,6 @@ export class JobService {
       throw new ApiError(404, 'Job not found');
     }
 
-    // Verify user owns this job's document
     if (job.document.userId !== userId) {
       throw new ApiError(403, 'Unauthorized');
     }

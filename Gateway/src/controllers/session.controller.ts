@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ApiResponse } from '../utils/apiResponse';
 import { SessionService } from '../services/session.service';
-import { CreateSessionDto, UpdateSessionDto } from '../schema/session.schema';
+import { CreateSessionDto, QuerySessionDto, UpdateSessionDto } from '../schema/session.schema';
 
 export const createSession = asyncHandler(async (req: Request, res: Response) => {
   const data: CreateSessionDto = req.body;
@@ -40,4 +40,10 @@ export const updateSession = asyncHandler(async (req: Request, res: Response) =>
 export const deleteSession = asyncHandler(async (req: Request, res: Response) => {
   await SessionService.deleteSession(req.params.sessionId as string, req.user!.id);
   res.status(200).json(new ApiResponse(200, null, 'Session deleted'));
+});
+
+export const querySession = asyncHandler(async (req: Request, res: Response) => {
+  const data: QuerySessionDto = req.body;
+  const result = await SessionService.dispatchQuery(req.params.sessionId as string, req.user!.id, data.question);
+  res.status(202).json(new ApiResponse(202, result, 'Query queued'));
 });

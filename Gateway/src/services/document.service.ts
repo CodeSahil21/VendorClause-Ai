@@ -3,8 +3,22 @@ import { minioClient, BUCKET_NAME } from '../lib/minio';
 import { ApiError } from '../utils/apiError';
 import { DocumentUploadResponse, DocumentWithJobs } from '../types/session.types';
 import { CacheService } from '../lib/cache';
-import { v4 as uuidv4 } from 'uuid';
-import { getQueue } from '../lib/queue';
+import { randomUUID } from 'crypto';
+import { getQueue, initQueue, IngestionJobData } from '../lib/queue';
+import { Queue } from 'bullmq';
+import { DOCUMENT_CACHE_TTL_SECONDS, deriveStatusUpdatedAt, sanitizeDocument } from './document_sanitizer';
+
+const getOrInitQueue = async (): Promise<Queue<IngestionJobData>> => {
+  try {
+    return getQueue();
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Queue not initialized')) {
+      await initQueue();
+      return getQueue();
+    }
+    throw error;
+  }
+};
 
 export class DocumentService {
   static async uploadDocument(
@@ -30,7 +44,7 @@ export class DocumentService {
     }
 
     const fileExtension = file.originalname.split('.').pop()?.toLowerCase() || 'bin';
-    const objectName = `${userId}/${sessionId}/${uuidv4()}.${fileExtension}`;
+    const objectName = `${userId}/${sessionId}/${randomUUID()}.${fileExtension}`;
 
     await minioClient.putObject(BUCKET_NAME, objectName, file.buffer, file.size, {
       'Content-Type': file.mimetype
@@ -56,17 +70,31 @@ export class DocumentService {
       }
     });
 
-    // Push job to Redis queue for Python worker
-    await getQueue().add('process-document', {
+    const queueJobPayload = {
       jobId: job.id,
       documentId: document.id,
       userId,
       pdfUrl: s3Url
-    });
+    };
+
+    // Push job to Redis queue for Python worker.
+    try {
+      const queue = await getOrInitQueue();
+      await queue.add('process-document', queueJobPayload);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error('Failed to enqueue ingestion job:', error);
+      throw new ApiError(503, `Ingestion queue is unavailable: ${detail}`);
+    }
 
     CacheService.invalidateSessionCache(userId, sessionId).catch(console.error);
 
-    return { document, job };
+    const safeDocument = await sanitizeDocument({
+      ...document,
+      statusUpdatedAt: document.updatedAt,
+    });
+
+    return { document: safeDocument, job };
   }
 
   static async getDocumentById(documentId: string, userId: string): Promise<DocumentWithJobs> {
@@ -86,8 +114,20 @@ export class DocumentService {
       throw new ApiError(404, 'Document not found');
     }
 
-    CacheService.setDocument(userId, documentId, document, 600).catch(console.error);
-    return document;
+    const enrichedDocument = {
+      ...document,
+      statusUpdatedAt: deriveStatusUpdatedAt(document.jobs, document.updatedAt),
+    };
+
+    const safeDocument = await sanitizeDocument(enrichedDocument);
+    const response: DocumentWithJobs = {
+      ...safeDocument,
+      jobs: document.jobs,
+      statusUpdatedAt: enrichedDocument.statusUpdatedAt,
+    };
+
+    CacheService.setDocument(userId, documentId, response, DOCUMENT_CACHE_TTL_SECONDS).catch(console.error);
+    return response;
   }
 
   static async deleteDocument(documentId: string, userId: string): Promise<void> {

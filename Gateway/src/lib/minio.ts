@@ -1,7 +1,7 @@
-import * as Minio from 'minio';
+import { Client, BucketItem } from 'minio';
 import { env } from '../config';
 
-export const minioClient = new Minio.Client({
+export const minioClient = new Client({
   endPoint: env.MINIO_ENDPOINT,
   port: env.MINIO_PORT,
   useSSL: env.MINIO_USE_SSL,
@@ -33,4 +33,20 @@ export const ensureBucket = async (): Promise<void> => {
     console.error('Failed to ensure bucket exists:', error);
     throw new Error(`MinIO bucket setup failed: ${error}`);
   }
+};
+
+export const getPresignedUrlFromMinioUri = async (uri: string, expirySeconds: number = 3600): Promise<string | null> => {
+  if (!uri.startsWith('minio://')) {
+    return null;
+  }
+
+  const withoutScheme = uri.replace('minio://', '');
+  const firstSlash = withoutScheme.indexOf('/');
+  if (firstSlash <= 0 || firstSlash === withoutScheme.length - 1) {
+    return null;
+  }
+
+  const bucket = withoutScheme.slice(0, firstSlash);
+  const objectName = withoutScheme.slice(firstSlash + 1);
+  return minioClient.presignedGetObject(bucket, objectName, expirySeconds);
 };

@@ -17,9 +17,11 @@ export interface DocumentResponse {
   sessionId: string;
   userId: string;
   fileName: string;
-  s3Url: string;
+  fileUrl: string | null;
   status: DocStatus;
   createdAt: Date;
+  updatedAt: Date;
+  statusUpdatedAt?: Date | null;
   jobs?: JobResponse[];
 }
 
@@ -41,4 +43,8 @@ export interface JobResponse {
   startedAt: Date | null;
   completedAt: Date | null;
   createdAt: Date;
+}
+
+export interface JobWithDocumentResponse extends JobResponse {
+  document: Pick<DocumentResponse, 'id' | 'userId' | 'fileName' | 'status'>;
 }

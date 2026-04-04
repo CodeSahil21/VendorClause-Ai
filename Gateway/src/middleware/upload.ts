@@ -1,13 +1,12 @@
+import { Request } from 'express';
 import multer from 'multer';
 import { ApiError } from '../utils/apiError';
 
 const storage = multer.memoryStorage();
 
-const allowedMimeTypes = [
-  'application/pdf'
-];
+const allowedMimeTypes = ['application/pdf'];
 
-const fileFilter = (_req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+const fileFilter = (_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
   if (allowedMimeTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
@@ -18,7 +17,5 @@ const fileFilter = (_req: any, file: Express.Multer.File, cb: multer.FileFilterC
 export const upload = multer({
   storage,
   fileFilter,
-  limits: {
-    fileSize: 50 * 1024 * 1024 // 50MB
-  }
+  limits: { fileSize: 50 * 1024 * 1024 },
 });

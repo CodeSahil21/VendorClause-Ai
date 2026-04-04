@@ -15,7 +15,7 @@ export const redis = createClient({
   },
 });
 
-redis.on('error', (err: any) => {
+redis.on('error', (err: Error) => {
   console.warn('⚠️  Redis connection failed:', err.message);
   console.log('📝 Application will continue without Redis caching');
 });
@@ -24,13 +24,30 @@ redis.on('connect', () => console.log('✅ Redis connected'));
 redis.on('disconnect', () => console.log('🔌 Redis disconnected'));
 
 let initialized = false;
+const localBlacklist = new Map<string, number>();
+
+const isLocallyBlacklisted = (jti: string): boolean => {
+  const expiresAt = localBlacklist.get(jti);
+  if (!expiresAt) return false;
+  if (expiresAt <= Date.now()) {
+    localBlacklist.delete(jti);
+    return false;
+  }
+  return true;
+};
+
+const rememberLocalBlacklist = (jti: string, ttlSec: number): void => {
+  localBlacklist.set(jti, Date.now() + ttlSec * 1000);
+};
+
 export const connectRedis = async (): Promise<void> => {
   if (!initialized) {
     try {
       await redis.connect();
       initialized = true;
-    } catch (error: any) {
-      console.warn('⚠️  Redis connection failed:', error.message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn('⚠️  Redis connection failed:', message);
     }
   }
 };
@@ -39,7 +56,7 @@ const sessionKey = (jti: string) => `auth:session:${jti}`;
 const blacklistKey = (jti: string) => `auth:blacklist:${jti}`;
 const resetTokenKey = (email: string) => `auth:reset:${email}`;
 
-export const setSession = async (jti: string, data: Record<string, unknown>, ttlSec: number): Promise<void> => {
+export const setSession = async (jti: string, data: unknown, ttlSec: number): Promise<void> => {
   try {
     if (!redis.isReady) {
       console.warn('Redis not ready, skipping session set');
@@ -51,7 +68,7 @@ export const setSession = async (jti: string, data: Record<string, unknown>, ttl
   }
 };
 
-export const getSession = async <T = any>(jti: string): Promise<T | null> => {
+export const getSession = async <T = unknown>(jti: string): Promise<T | null> => {
   try {
     if (!redis.isReady) {
       return null;
@@ -73,6 +90,7 @@ export const delSession = async (jti: string): Promise<void> => {
 };
 
 export const blacklist = async (jti: string, ttlSec: number): Promise<void> => {
+  rememberLocalBlacklist(jti, ttlSec);
   try {
     if (!redis.isReady) return;
     await redis.set(blacklistKey(jti), '1', { EX: ttlSec });
@@ -82,14 +100,18 @@ export const blacklist = async (jti: string, ttlSec: number): Promise<void> => {
 };
 
 export const isBlacklisted = async (jti: string): Promise<boolean> => {
+  if (isLocallyBlacklisted(jti)) {
+    return true;
+  }
+
   try {
     if (!redis.isReady) {
-      return true; // Fail closed — reject tokens when Redis is unavailable
+      return false;
     }
     const exists = await redis.exists(blacklistKey(jti));
     return exists === 1;
   } catch (error) {
-    return true; // Fail closed on error
+    return false;
   }
 };
 

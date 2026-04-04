@@ -3,6 +3,8 @@ import { ApiError } from '../utils/apiError';
 import { CreateSessionDto, UpdateSessionDto } from '../schema/session.schema';
 import { SessionResponse, SessionWithDocuments } from '../types/session.types';
 import { CacheService } from '../lib/cache';
+import { redis } from '../lib/redis';
+import { deriveStatusUpdatedAt, sanitizeDocument } from './document_sanitizer';
 
 export class SessionService {
   static async createSession(userId: string, data: CreateSessionDto): Promise<SessionResponse> {
@@ -60,16 +62,37 @@ export class SessionService {
       throw new ApiError(404, 'Session not found');
     }
 
+    const enrichedSession: SessionWithDocuments = session.document
+      ? {
+          id: session.id,
+          userId: session.userId,
+          title: session.title,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          document: await sanitizeDocument({
+            ...session.document,
+            statusUpdatedAt: deriveStatusUpdatedAt(session.document.jobs, session.document.updatedAt),
+          }),
+        }
+      : {
+          id: session.id,
+          userId: session.userId,
+          title: session.title,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          document: null,
+        };
+
     // Only cache sessions with documents in terminal states (READY/FAILED) or no document
     // Don't cache PENDING/PROCESSING - polling needs fresh DB reads for status transitions
-    const isTransitional = session.document &&
-      (session.document.status === 'PENDING' || session.document.status === 'PROCESSING');
+    const isTransitional = enrichedSession.document &&
+      (enrichedSession.document.status === 'PENDING' || enrichedSession.document.status === 'PROCESSING');
 
     if (!isTransitional) {
-      CacheService.setSessionWithDocuments(userId, sessionId, session, 300).catch(console.error);
+      CacheService.setSessionWithDocuments(userId, sessionId, enrichedSession, 300).catch(console.error);
     }
     
-    return session;
+    return enrichedSession;
   }
 
   static async updateSession(sessionId: string, userId: string, data: UpdateSessionDto): Promise<SessionResponse> {
@@ -105,5 +128,39 @@ export class SessionService {
     });
 
     CacheService.invalidateSessionCache(userId, sessionId).catch(console.error);
+  }
+
+  static async dispatchQuery(sessionId: string, userId: string, question: string): Promise<{ queued: boolean; sessionId: string }> {
+    const session = await prisma.chatSession.findFirst({
+      where: { id: sessionId, userId },
+      include: { document: true }
+    });
+
+    if (!session) {
+      throw new ApiError(404, 'Session not found');
+    }
+    if (!session.document) {
+      throw new ApiError(400, 'No document linked to this session');
+    }
+    if (session.document.status !== 'READY') {
+      throw new ApiError(400, `Document status is ${session.document.status}. Query is allowed only when READY.`);
+    }
+    if (!redis.isReady) {
+      throw new ApiError(503, 'Redis is not ready');
+    }
+    const queryWorkerAlive = await redis.get('query-worker:heartbeat');
+    if (!queryWorkerAlive) {
+      throw new ApiError(503, 'Query service is unavailable. Please retry shortly.');
+    }
+
+    const payload = {
+      question,
+      sessionId,
+      documentId: session.document.id,
+      userId,
+    };
+
+    await redis.publish(`query:request:${sessionId}`, JSON.stringify(payload));
+    return { queued: true, sessionId };
   }
 }

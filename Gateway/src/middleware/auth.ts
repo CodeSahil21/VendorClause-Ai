@@ -6,6 +6,13 @@ import { env } from "../config";
 import { prisma } from "../lib/prisma";
 import { getSession, isBlacklisted, setSession } from "../lib/redis";
 
+interface CachedUserSession {
+  userId: string;
+  email: string;
+  name: string | null;
+  lastActivity: number;
+}
+
 declare global {
   namespace Express {
     interface Request {
@@ -37,7 +44,7 @@ export const verifyJWT = asyncHandler(
       }
 
       // Then get session data
-      const sessionData = await getSession(decoded.jti);
+      const sessionData = await getSession<CachedUserSession>(decoded.jti);
 
       let userData = sessionData;
       

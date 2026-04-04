@@ -43,18 +43,15 @@ export class AuthService {
     });
 
     if (!user) {
-      console.log(`❌ Login failed: User not found for email: ${data.email}`);
       throw new ApiError(401, 'Invalid credentials');
     }
 
     const isPasswordValid = await comparePassword(data.password, user.passwordHash);
 
     if (!isPasswordValid) {
-      console.log(`❌ Login failed: Invalid password for email: ${data.email}`);
       throw new ApiError(401, 'Invalid credentials');
     }
 
-    console.log(`✅ Login successful for email: ${data.email}`);
     const token = generateToken(user.id, user.email);
 
     return {

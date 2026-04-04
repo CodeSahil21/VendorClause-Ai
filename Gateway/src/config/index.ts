@@ -8,7 +8,9 @@ const requiredEnvVars = {
   SMTP_HOST: process.env.SMTP_HOST,
   SMTP_USER: process.env.SMTP_USER,
   SMTP_PASS: process.env.SMTP_PASS,
-  REDIS_PASSWORD: process.env.REDIS_PASSWORD
+  REDIS_PASSWORD: process.env.REDIS_PASSWORD,
+  MINIO_ACCESS_KEY: process.env.MINIO_ACCESS_KEY,
+  MINIO_SECRET_KEY: process.env.MINIO_SECRET_KEY
 };
 
 // Validate required environment variables
@@ -36,6 +38,7 @@ export const env = {
   
   // Frontend
   FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:3000',
+  CORS_ORIGINS: process.env.CORS_ORIGINS,
   
   // SMTP
   SMTP_HOST: requiredEnvVars.SMTP_HOST!,
@@ -54,7 +57,7 @@ export const env = {
   MINIO_ENDPOINT: process.env.MINIO_ENDPOINT || 'localhost',
   MINIO_PORT: parseInt(process.env.MINIO_PORT || '9000', 10),
   MINIO_USE_SSL: process.env.MINIO_USE_SSL === 'true',
-  MINIO_ACCESS_KEY: process.env.MINIO_ACCESS_KEY || 'minioadmin',
-  MINIO_SECRET_KEY: process.env.MINIO_SECRET_KEY || 'minioadmin',
+  MINIO_ACCESS_KEY: requiredEnvVars.MINIO_ACCESS_KEY!,
+  MINIO_SECRET_KEY: requiredEnvVars.MINIO_SECRET_KEY!,
   MINIO_BUCKET_NAME: process.env.MINIO_BUCKET_NAME || 'documents',
 };

@@ -7,7 +7,7 @@ export const errorHandler = (
   err: Error | ApiError,
   req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction
 ) => {
   let error = err;
 
@@ -26,17 +26,15 @@ export const errorHandler = (
     errors: (error as ApiError).errors || [],
     ...(env.NODE_ENV === 'development' && { stack: error.stack }),
     timestamp: new Date().toISOString(),
-    path: req.path
+    path: req.path,
   };
 
   res.status(statusCode).json(new ApiResponse(statusCode, errorData, message));
 };
 
 export const notFoundHandler = (req: Request, res: Response) => {
-  const errorData = {
+  res.status(404).json(new ApiResponse(404, {
     timestamp: new Date().toISOString(),
-    path: req.originalUrl
-  };
-  
-  res.status(404).json(new ApiResponse(404, errorData, `Route ${req.originalUrl} not found`));
+    path: req.originalUrl,
+  }, `Route ${req.originalUrl} not found`));
 };

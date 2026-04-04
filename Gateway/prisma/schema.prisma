@@ -45,6 +45,7 @@ model Document {
   s3Url       String
   status      DocStatus    @default(PENDING)
   createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
   
   jobs        Job[]
 
@@ -80,8 +81,6 @@ model Job {
 
 enum TaskType {
   FULL_INGESTION
-  GRAPH_EXTRACTION
-  REPORT_GENERATION
 }
 
 enum JobStatus {

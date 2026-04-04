@@ -1,12 +1,17 @@
+export interface ValidationError {
+  field: string | undefined;
+  message: string | undefined;
+}
+
 export class ApiError extends Error {
   statusCode: number;
   success: boolean;
-  errors: any[];
+  errors: ValidationError[];
 
   constructor(
     statusCode: number,
-    message = "Something went wrong",
-    errors: any[] = []
+    message = 'Something went wrong',
+    errors: ValidationError[] = []
   ) {
     super(message);
     this.statusCode = statusCode;

@@ -6,14 +6,14 @@ import { ApiResponse } from '../utils/apiResponse';
 const memoryStore = new Map<string, { count: number; resetTime: number }>();
 
 // Clean up expired entries every 5 minutes
-setInterval(() => {
+const cleanupTimer: ReturnType<typeof setInterval> = setInterval(() => {
   const now = Date.now();
   for (const [key, record] of memoryStore) {
     if (now >= record.resetTime) {
       memoryStore.delete(key);
     }
   }
-}, 5 * 60 * 1000).unref();
+}, 5 * 60 * 1000);
 
 const createRateLimit = (windowMs: number, max: number, keyPrefix: string) => {
   return async (req: Request, res: Response, next: NextFunction) => {

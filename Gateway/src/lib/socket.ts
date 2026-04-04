@@ -3,13 +3,67 @@ import { Server, Socket } from 'socket.io';
 import Redis from 'ioredis';
 import { env } from '../config';
 
+type JobStatus = 'QUEUED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED';
+type QueryStreamEvent = 'stream:token' | 'stream:done' | 'stream:error' | 'stream:sources';
+
+interface JobStatusPayload {
+  jobId: string;
+  status: JobStatus;
+  timestamp: string;
+  documentId?: string;
+  error?: string;
+}
+
+interface JobProgressPayload {
+  event: 'job:progress';
+  jobId: string;
+  documentId: string;
+  status: 'IN_PROGRESS' | 'COMPLETED';
+  progress: number;
+  stage: string;
+}
+
+const isJobProgressPayload = (data: JobStatusPayload | JobProgressPayload): data is JobProgressPayload => {
+  return (data as JobProgressPayload).event === 'job:progress';
+};
+
+interface StreamTokenPayload {
+  token: string;
+}
+
+interface StreamDonePayload {
+  message: string;
+}
+
+interface StreamErrorPayload {
+  message: string;
+}
+
+interface StreamSourcesPayload {
+  sources: Array<{ chunk_id?: string; clause_type?: string; importance?: number }>;
+}
+
+type QueryStreamPayload = StreamTokenPayload | StreamDonePayload | StreamErrorPayload | StreamSourcesPayload;
+
+interface QueryStreamMessage {
+  event: QueryStreamEvent;
+  payload: QueryStreamPayload;
+}
+
 let io: Server | null = null;
 let subscriber: Redis | null = null;
+// Room contract:
+// - jobId room (`join`) receives `job:status` only.
+// - sessionId room (`join-session`) receives `stream:*` query events.
+const socketCorsOrigins = [
+  env.FRONTEND_URL,
+  ...(env.CORS_ORIGINS ? env.CORS_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean) : []),
+];
 
 export function setupSocketIO(httpServer: HTTPServer): Server {
   io = new Server(httpServer, {
     cors: {
-      origin: [env.FRONTEND_URL, 'http://localhost:3000', 'http://localhost:3001'],
+      origin: socketCorsOrigins,
       credentials: true,
       methods: ['GET', 'POST']
     },
@@ -22,7 +76,7 @@ export function setupSocketIO(httpServer: HTTPServer): Server {
     host: env.REDIS_HOST,
     port: env.REDIS_PORT,
     password: env.REDIS_PASSWORD,
-    retryStrategy: (times) => Math.min(times * 50, 2000)
+    retryStrategy: (times: number) => Math.min(times * 50, 2000)
   });
 
   subscriber.on('error', (err) => {
@@ -38,45 +92,43 @@ export function setupSocketIO(httpServer: HTTPServer): Server {
   });
 
   // Subscribe to both channels
-  subscriber.psubscribe('job:*', (err, count) => {
+  subscriber.psubscribe('job:*', (err: Error | null, count: number) => {
     if (err) console.error('❌ Failed to psubscribe job:*:', err);
     else console.log(`✅ Subscribed to job:* (${count} subscriptions)`);
   });
 
-  subscriber.subscribe('ingestion:complete', (err, count) => {
-    if (err) console.error('❌ Failed to subscribe ingestion:complete:', err);
-    else console.log(`✅ Subscribed to ingestion:complete (${count} subscriptions)`);
+  subscriber.psubscribe('query:stream:*', (err: Error | null, count: number) => {
+    if (err) console.error('❌ Failed to psubscribe query:stream:*:', err);
+    else console.log(`✅ Subscribed to query:stream:* (${count} subscriptions)`);
   });
 
   // Handle pattern messages (job:*)
   subscriber.on('pmessage', (_pattern: string, channel: string, message: string) => {
     try {
-      const jobId = channel.split(':')[1];
-      const data = JSON.parse(message);
-      
-      io?.to(jobId).emit('job:status', data);
-      console.log(`📢 Job status ${jobId}:`, data.status);
+      if (channel.startsWith('job:')) {
+        const jobId = channel.split(':')[1];
+        const data = JSON.parse(message) as JobStatusPayload | JobProgressPayload;
+
+        if (isJobProgressPayload(data)) {
+          io?.to(jobId).emit('job:progress', data);
+          console.log(`📢 Job progress ${jobId}:`, data.progress, data.stage);
+        } else {
+          io?.to(jobId).emit('job:status', data);
+          console.log(`📢 Job status ${jobId}:`, (data as JobStatusPayload).status);
+        }
+        return;
+      }
+
+      if (channel.startsWith('query:stream:')) {
+        const sessionId = channel.split(':')[2];
+        const data = JSON.parse(message) as QueryStreamMessage;
+        if (data?.event) {
+          io?.to(sessionId).emit(data.event, data.payload);
+        }
+        return;
+      }
     } catch (error) {
       console.error('❌ pmessage error:', error);
-    }
-  });
-
-  // Handle direct messages (ingestion:complete) - only emit to relevant rooms
-  subscriber.on('message', (_channel: string, message: string) => {
-    try {
-      const data = JSON.parse(message);
-
-      // Emit to document room (for chat subscribers)
-      if (data.documentId) {
-        io?.to(data.documentId).emit('ingestion:complete', data);
-      }
-      // Also emit to job room (so useJobStatus receives completion)
-      if (data.jobId) {
-        io?.to(data.jobId).emit('ingestion:complete', data);
-      }
-      console.log(`📢 Ingestion complete:`, data.documentId);
-    } catch (error) {
-      console.error('❌ message error:', error);
     }
   });
 
@@ -89,9 +141,9 @@ export function setupSocketIO(httpServer: HTTPServer): Server {
       console.log(`✅ Client ${socket.id} joined room: ${jobId}`);
     });
 
-    socket.on('join-chat', (documentId: string) => {
-      socket.join(documentId);
-      console.log(`✅ Client ${socket.id} joined chat room: ${documentId}`);
+    socket.on('join-session', (sessionId: string) => {
+      socket.join(sessionId);
+      console.log(`✅ Client ${socket.id} joined session room: ${sessionId}`);
     });
 
     socket.on('leave', (jobId: string) => {
@@ -99,9 +151,9 @@ export function setupSocketIO(httpServer: HTTPServer): Server {
       console.log(`👋 Client ${socket.id} left room: ${jobId}`);
     });
 
-    socket.on('leave-chat', (documentId: string) => {
-      socket.leave(documentId);
-      console.log(`👋 Client ${socket.id} left chat room: ${documentId}`);
+    socket.on('leave-session', (sessionId: string) => {
+      socket.leave(sessionId);
+      console.log(`👋 Client ${socket.id} left session room: ${sessionId}`);
     });
 
     socket.on('disconnect', (reason) => {
