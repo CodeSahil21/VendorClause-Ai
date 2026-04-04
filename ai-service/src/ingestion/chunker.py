@@ -1,9 +1,12 @@
+# Standard library
 import hashlib
 import re
 
+# Third-party
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+# Local
 from .constants import SECTION_PATTERN
 
 

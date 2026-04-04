@@ -1,9 +1,12 @@
+# Standard library
 import asyncio
 import logging
 import re
 
+# Third-party
 from langchain_core.documents import Document
 
+# Local
 from src.shared.langfuse_config import update_observation
 from .constants import ALLOWED_NODES, ALLOWED_RELATIONSHIPS, ENTITY_ALIASES, IGNORED_ENTITIES
 

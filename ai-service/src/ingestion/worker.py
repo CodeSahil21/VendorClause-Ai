@@ -1,3 +1,4 @@
+# Standard library
 import asyncio
 import json
 import logging
@@ -9,15 +10,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+# Path bootstrap — must happen before any local imports.
+# Only needed when running as a script (python worker.py).
+# When using -m (python -m src.ingestion.worker) sys.path is already set.
+_root = str(Path(__file__).parent.parent.parent)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
 
+# Third-party
 import boto3
 from bullmq import Worker as BullMQWorker
-from redis import Redis
 
+# Local
 from src.ingestion.pipeline import LegalRAGIngestion
-from src.shared.database_service import DatabaseService
+from src.shared.database_service import get_database_service
 from src.shared.langfuse_config import trace_ingestion, update_trace
+from src.shared.progress_events import publish_job_progress
+from src.shared.redis_client import create_redis_client
 from src.shared.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -25,14 +34,9 @@ logger = logging.getLogger(__name__)
 
 class IngestionWorker:
     def __init__(self):
-        self.redis = Redis(
-            host=settings.redis_host,
-            port=settings.redis_port,
-            password=settings.redis_password,
-            decode_responses=True,
-        )
+        self.redis = create_redis_client()
         self.pipeline = LegalRAGIngestion()
-        self.db = DatabaseService()
+        self.db = get_database_service()
 
         self.s3_client = boto3.client(
             "s3",
@@ -89,7 +93,7 @@ class IngestionWorker:
             if job_id:
                 try:
                     await asyncio.to_thread(self.db.update_job_status, job_id, "FAILED", error_msg)
-                    self._publish_status(job_id, "FAILED", documentId=document_id, error=error_msg)
+                    await self._publish_status(job_id, "FAILED", documentId=document_id, error=error_msg)
                 except Exception as update_error:
                     logger.error(f"Failed to mark malformed job payload as FAILED for {job_id}: {update_error}")
 
@@ -111,7 +115,7 @@ class IngestionWorker:
         try:
             await asyncio.to_thread(self.db.update_job_status, job_id, "IN_PROGRESS")
             await asyncio.to_thread(self.db.update_document_status, document_id, "PROCESSING")
-            self._publish_status(job_id, "IN_PROGRESS", documentId=document_id)
+            await self._publish_status(job_id, "IN_PROGRESS", documentId=document_id)
 
             bucket, key = self._parse_minio_url(pdf_url)
 
@@ -128,7 +132,8 @@ class IngestionWorker:
 
             await asyncio.to_thread(self.db.update_job_status, job_id, "COMPLETED")
             await asyncio.to_thread(self.db.update_document_status, document_id, "READY")
-            self._publish_status(job_id, "COMPLETED", documentId=document_id)
+            await publish_job_progress(self.redis, job_id, document_id, "COMPLETED", 100, "done")
+            await self._publish_status(job_id, "COMPLETED", documentId=document_id)
             update_trace({"stage": "job_completed", "status": "COMPLETED"})
             logger.info(f"Job {job_id} completed")
 
@@ -137,11 +142,11 @@ class IngestionWorker:
             logger.error(f"Job {job_id} failed: {error_msg}")
             await asyncio.to_thread(self.db.update_job_status, job_id, "FAILED", error_msg)
             await asyncio.to_thread(self.db.update_document_status, document_id, "FAILED")
-            self._publish_status(job_id, "FAILED", documentId=document_id, error=error_msg)
+            await self._publish_status(job_id, "FAILED", documentId=document_id, error=error_msg)
             update_trace({"stage": "job_failed", "status": "FAILED", "error": error_msg})
             # Not re-raised: BullMQ would retry and cause duplicate execution
 
-    def _publish_status(self, job_id: str, status: str, **extra) -> None:
+    async def _publish_status(self, job_id: str, status: str, **extra) -> None:
         try:
             message = {
                 "jobId": job_id,
@@ -149,15 +154,8 @@ class IngestionWorker:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 **extra,
             }
-            self.redis.publish(f"job:{job_id}", json.dumps(message))
+            await self.redis.publish(f"job:{job_id}", json.dumps(message))
             logger.info(f"Published job:{job_id} -> {status}")
-
-            if status == "COMPLETED":
-                self.redis.publish("ingestion:complete", json.dumps({
-                    "documentId": extra.get("documentId"),
-                    "jobId": job_id,
-                }))
-                logger.info(f"Broadcasted ingestion:complete for document {extra.get('documentId')}")
         except Exception as e:
             logger.error(f"Failed to publish status: {e}")
 
@@ -169,12 +167,21 @@ class IngestionWorker:
 
         shutdown_event = asyncio.Event()
 
-        def signal_handler(sig, frame):
-            logger.info("Shutdown signal received")
-            shutdown_event.set()
+        def request_shutdown() -> None:
+            if not shutdown_event.is_set():
+                logger.info("Shutdown signal received")
+                shutdown_event.set()
 
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGINT, signal_handler)
+        loop = asyncio.get_running_loop()
+        for sig_name in ("SIGTERM", "SIGINT"):
+            sig = getattr(signal, sig_name, None)
+            if sig is None:
+                continue
+            try:
+                loop.add_signal_handler(sig, request_shutdown)
+            except (NotImplementedError, RuntimeError):
+                # Windows: add_signal_handler is not supported, use threading signal
+                signal.signal(sig, lambda _s, _f: loop.call_soon_threadsafe(request_shutdown))
 
         worker = BullMQWorker(
             "document-ingestion",
@@ -188,6 +195,7 @@ class IngestionWorker:
         logger.info("Shutting down worker")
         await worker.close()
         await self.pipeline.close()
+        await self.redis.aclose()
         logger.info("Worker stopped")
 
 

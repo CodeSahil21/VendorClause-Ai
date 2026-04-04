@@ -1,9 +1,12 @@
+# Standard library
 import asyncio
 import logging
 
+# Third-party
 from langchain_core.documents import Document
 from qdrant_client import AsyncQdrantClient, models
 
+# Local
 from src.shared.langfuse_config import update_observation
 
 logger = logging.getLogger(__name__)

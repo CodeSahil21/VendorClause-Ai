@@ -1,8 +1,10 @@
+# Standard library
 import asyncio
 import logging
 import os
 import time
 
+# Third-party
 from fastembed import SparseTextEmbedding
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
@@ -12,11 +14,13 @@ from langchain_openai import ChatOpenAI
 from llama_parse import LlamaParse
 from qdrant_client import AsyncQdrantClient, models
 
+# Local
 from src.shared.langfuse_config import get_langfuse_handler, update_observation, update_trace
 from src.shared.neo4j_service import Neo4jService
 from src.shared.progress_tracker import ProgressTracker
+from src.shared.progress_events import publish_job_progress
+from src.shared.redis_client import get_shared_redis
 from src.shared.settings import settings
-
 from .chunker import DocumentChunker
 from .constants import ALLOWED_NODES, ALLOWED_RELATIONSHIPS, GRAPH_SYSTEM_PROMPT
 from .graph_extractor import GraphExtractor
@@ -65,7 +69,7 @@ class LegalRAGIngestion:
 
         sparse_model = SparseTextEmbedding(model_name="prithivida/Splade_PP_en_v1")
         qdrant = AsyncQdrantClient(url=settings.qdrant_url)
-        self.collection_name = "legal_contracts_hybrid"
+        self.collection_name = settings.qdrant_collection_name
         self.neo4j = Neo4jService()
 
         self.parser = LlamaParse(
@@ -132,9 +136,14 @@ class LegalRAGIngestion:
 
         pipeline_start = time.time()
         await self.init_qdrant()
+        redis_client = await get_shared_redis()
 
         # ── Stage 1: Parse ────────────────────────────────────────────────────
         self.progress.update("parsing", document_id=document_id, progress=10, stage="parse_pdf")
+        try:
+            await publish_job_progress(redis_client, job_id, document_id, "IN_PROGRESS", 10, "parse_pdf")
+        except Exception:
+            logger.warning("Failed to publish job progress for %s", job_id, exc_info=True)
         t0 = time.time()
         text = await self.parse_pdf(file_path)
         parse_time = time.time() - t0
@@ -143,6 +152,10 @@ class LegalRAGIngestion:
 
         # ── Stage 2: Chunk ────────────────────────────────────────────────────
         self.progress.update("chunking", document_id=document_id, progress=25, stage="chunk")
+        try:
+            await publish_job_progress(redis_client, job_id, document_id, "IN_PROGRESS", 25, "chunk")
+        except Exception:
+            logger.warning("Failed to publish job progress for %s", job_id, exc_info=True)
         t0 = time.time()
         chunks = await asyncio.to_thread(self.chunk_document, text, document_id)
         chunk_time = time.time() - t0
@@ -151,6 +164,10 @@ class LegalRAGIngestion:
 
         # ── Stage 3: Graph extraction + Vector indexing (parallel) ────────────
         self.progress.update("processing", document_id=document_id, progress=40, stage="parallel_extract_and_index")
+        try:
+            await publish_job_progress(redis_client, job_id, document_id, "IN_PROGRESS", 40, "parallel_extract_and_index")
+        except Exception:
+            logger.warning("Failed to publish job progress for %s", job_id, exc_info=True)
         high_value_chunks = [c for c in chunks if c.metadata.get("importance", 1) >= 2] or chunks
         pruned = len(chunks) - len(high_value_chunks)
 
@@ -170,6 +187,10 @@ class LegalRAGIngestion:
 
         # ── Stage 4: Neo4j storage ────────────────────────────────────────────
         self.progress.update("neo4j_storage", document_id=document_id, progress=85, stage="store_graph")
+        try:
+            await publish_job_progress(redis_client, job_id, document_id, "IN_PROGRESS", 85, "store_graph")
+        except Exception:
+            logger.warning("Failed to publish job progress for %s", job_id, exc_info=True)
         t0 = time.time()
         await self.neo4j.create_document_node(document_id, {"type": "Contract"})
         await self.neo4j.store_graph_documents(graph_docs, document_id)
@@ -179,6 +200,10 @@ class LegalRAGIngestion:
 
         # ── Done ──────────────────────────────────────────────────────────────
         self.progress.update("complete", document_id=document_id, progress=100, stage="done")
+        try:
+            await publish_job_progress(redis_client, job_id, document_id, "IN_PROGRESS", 99, "finalizing")
+        except Exception:
+            logger.warning("Failed to publish job progress for %s", job_id, exc_info=True)
         total_time = time.time() - pipeline_start
         update_trace({
             "stage": "complete",
