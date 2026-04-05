@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { Send, FileText, Download, ExternalLink } from 'lucide-react';
 import { useSocket } from '@/context/SocketContext';
 import { sessionApi } from '@/api';
@@ -19,6 +20,16 @@ export default function ChatDocument({ sessionId, fileName, fileUrl }: ChatDocum
   const streamingTextRef = useRef('');
   const { socket } = useSocket();
   const pdfUrl = fileUrl || '';
+
+  // Load chat history on mount
+  useEffect(() => {
+    sessionApi.getChatHistory(sessionId).then(history => {
+      setMessages(history.map(m => ({
+        role: m.role === 'USER' ? 'user' : 'assistant',
+        content: m.content,
+      })));
+    }).catch(() => {});
+  }, [sessionId]);
 
   useEffect(() => {
     if (!socket) return;
@@ -170,13 +181,17 @@ export default function ChatDocument({ sessionId, fileName, fileUrl }: ChatDocum
                   className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`max-w-xs px-4 py-2 rounded-lg ${
+                    className={`max-w-[80%] px-4 py-2 rounded-lg ${
                       msg.role === 'user'
                         ? 'bg-indigo-600 text-white'
                         : 'bg-gray-100 text-gray-900'
                     }`}
                   >
-                    <p className="text-sm">{msg.content}</p>
+                    <div className={`text-sm prose prose-sm max-w-none ${
+                      msg.role === 'user' ? 'prose-invert' : ''
+                    }`}>
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    </div>
                   </div>
                 </div>
               ))
@@ -185,7 +200,9 @@ export default function ChatDocument({ sessionId, fileName, fileUrl }: ChatDocum
               <div className="flex justify-start">
                 <div className="bg-gray-100 text-gray-900 px-4 py-2 rounded-lg">
                   {streamingText ? (
-                    <p className="text-sm whitespace-pre-wrap">{streamingText}</p>
+                    <div className="text-sm prose prose-sm max-w-none">
+                      <ReactMarkdown>{streamingText}</ReactMarkdown>
+                    </div>
                   ) : (
                     <div className="flex gap-1">
                       <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
