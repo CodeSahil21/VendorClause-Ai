@@ -130,6 +130,22 @@ export class SessionService {
     CacheService.invalidateSessionCache(userId, sessionId).catch(console.error);
   }
 
+  static async getChatHistory(sessionId: string, userId: string, limit: number = 50): Promise<{ role: string; content: string; createdAt: string }[]> {
+    const session = await prisma.chatSession.findFirst({
+      where: { id: sessionId, userId },
+    });
+    if (!session) throw new ApiError(404, 'Session not found');
+
+    const messages = await prisma.message.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+      select: { role: true, content: true, createdAt: true },
+    });
+
+    return messages.map(m => ({ role: m.role, content: m.content, createdAt: m.createdAt.toISOString() }));
+  }
+
   static async dispatchQuery(sessionId: string, userId: string, question: string): Promise<{ queued: boolean; sessionId: string }> {
     const session = await prisma.chatSession.findFirst({
       where: { id: sessionId, userId },

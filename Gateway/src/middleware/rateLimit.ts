@@ -53,6 +53,48 @@ const createRateLimit = (windowMs: number, max: number, keyPrefix: string) => {
   };
 };
 
+const createUserRateLimit = (windowMs: number, max: number, keyPrefix: string) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const identity = req.user?.id || req.ip;
+    const key = `${keyPrefix}:${identity}`;
+    const now = Date.now();
+
+    try {
+      let count = 1;
+
+      if (redis.isReady) {
+        const current = await redis.incr(key);
+        if (current === 1) {
+          await redis.expire(key, Math.floor(windowMs / 1000));
+        }
+        count = current;
+      } else {
+        const record = memoryStore.get(key);
+        if (record && now < record.resetTime) {
+          count = record.count + 1;
+          memoryStore.set(key, { count, resetTime: record.resetTime });
+        } else {
+          count = 1;
+          memoryStore.set(key, { count, resetTime: now + windowMs });
+        }
+      }
+
+      if (count > max) {
+        res.status(429).json(
+          new ApiResponse(429, null, 'Too many queries. Please wait a minute and try again.')
+        );
+        return;
+      }
+
+      next();
+    } catch (error) {
+      console.warn('Rate limit error:', error);
+      next();
+    }
+  };
+};
+
 export const authRateLimit = createRateLimit(15 * 60 * 1000, 20, 'auth_rate_limit');
 export const apiRateLimit = createRateLimit(15 * 60 * 1000, 100, 'api_rate_limit');
 export const uploadRateLimit = createRateLimit(60 * 60 * 1000, 10, 'upload_rate_limit');
+export const queryRateLimit = createUserRateLimit(60 * 1000, 20, 'query_rate_limit');

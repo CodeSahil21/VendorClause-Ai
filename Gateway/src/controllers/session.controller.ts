@@ -47,3 +47,9 @@ export const querySession = asyncHandler(async (req: Request, res: Response) => 
   const result = await SessionService.dispatchQuery(req.params.sessionId as string, req.user!.id, data.question);
   res.status(202).json(new ApiResponse(202, result, 'Query queued'));
 });
+
+export const getChatHistory = asyncHandler(async (req: Request, res: Response) => {
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
+  const result = await SessionService.getChatHistory(req.params.sessionId as string, req.user!.id, limit);
+  res.status(200).json(new ApiResponse(200, result, 'Chat history retrieved'));
+});

@@ -7,6 +7,7 @@ import { randomUUID } from 'crypto';
 import { getQueue, initQueue, IngestionJobData } from '../lib/queue';
 import { Queue } from 'bullmq';
 import { DOCUMENT_CACHE_TTL_SECONDS, deriveStatusUpdatedAt, sanitizeDocument } from './document_sanitizer';
+import { env } from '../config';
 
 const getOrInitQueue = async (): Promise<Queue<IngestionJobData>> => {
   try {
@@ -21,6 +22,50 @@ const getOrInitQueue = async (): Promise<Queue<IngestionJobData>> => {
 };
 
 export class DocumentService {
+  private static async callMcpCleanup(
+    baseUrl: string,
+    tool: string,
+    documentId: string,
+  ): Promise<void> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (env.MCP_AUTH_KEY) {
+      headers['X-API-Key'] = env.MCP_AUTH_KEY;
+    }
+
+    const response = await fetch(`${baseUrl}/messages`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        tool,
+        params: { document_id: documentId },
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`${tool} failed with status ${response.status}`);
+    }
+
+    const body = await response.json() as { success?: boolean; error?: string };
+    if (body.success === false) {
+      throw new Error(body.error || `${tool} returned unsuccessful response`);
+    }
+  }
+
+  private static async cleanupAiServiceDocumentData(documentId: string): Promise<void> {
+    await Promise.allSettled([
+      this.callMcpCleanup(env.QDRANT_MCP_URL, 'delete_document', documentId),
+      this.callMcpCleanup(env.NEO4J_MCP_URL, 'delete_document_graph', documentId),
+    ]).then((results) => {
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          console.warn('AI-service cleanup warning:', result.reason);
+        }
+      }
+    });
+  }
+
   static async uploadDocument(
     userId: string,
     sessionId: string,
@@ -141,6 +186,9 @@ export class DocumentService {
 
     const objectName = document.s3Url.replace(`minio://${BUCKET_NAME}/`, '');
     await minioClient.removeObject(BUCKET_NAME, objectName);
+
+    // Best-effort cleanup in AI-service stores (Qdrant + Neo4j) to avoid stale retrieval data.
+    await this.cleanupAiServiceDocumentData(documentId);
 
     await prisma.document.delete({
       where: { id: documentId }

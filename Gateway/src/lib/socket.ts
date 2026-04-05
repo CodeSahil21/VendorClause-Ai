@@ -33,6 +33,7 @@ interface StreamTokenPayload {
 
 interface StreamDonePayload {
   message: string;
+  sources?: Array<{ chunk_id?: string; clause_type?: string; importance?: number }>;
 }
 
 interface StreamErrorPayload {
