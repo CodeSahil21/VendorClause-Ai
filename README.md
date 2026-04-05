@@ -9,6 +9,18 @@ It provides:
 - Hybrid retrieval (vector + graph)
 - Streaming, source-grounded chat answers
 
+## Demo Video
+
+Store your demo inside this repo and render it directly:
+
+<video src="./assets/VendorClause.mp4" controls width="100%" preload="metadata">
+	Your browser does not support the video tag.
+</video>
+
+Direct file link: [Watch Demo](./assets/VendorClause.mp4)
+
+Tip: Keep the file under ~25-50 MB for faster loading on GitHub.
+
 The repository is organized as a multi-service workspace:
 
 - `client/`: Next.js frontend
