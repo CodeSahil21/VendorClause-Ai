@@ -6,7 +6,6 @@ import signal
 import uuid
 from typing import Any
 
-# Third-party
 # Local
 from src.retrieval.fusion import _get_cross_encoder
 from src.retrieval.graph import build_graph, close_graph_resources
