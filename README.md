@@ -1,514 +1,339 @@
-# PolyGot
+# VendorClause-ai
 
-PolyGot is an end-to-end legal document intelligence platform.
+PolyGot is an end-to-end AI document intelligence platform for legal-style workflows.
 
-It supports:
+It provides:
 
 - Secure auth and session management
-- PDF upload and ingestion pipeline
+- PDF upload and asynchronous ingestion
 - Hybrid retrieval (vector + graph)
-- Streaming, citation-aware AI answers
-- Real-time progress and query updates
+- Streaming, source-grounded chat answers
 
-This README is the single project-level guide for understanding architecture, data flow, and local setup.
+The repository is organized as a multi-service workspace:
 
-## 1. Monorepo Layout
+- `client/`: Next.js frontend
+- `Gateway/`: Node.js/Express API, auth, sessions, upload, queue producer, Socket.IO bridge
+- `ai-service/`: Python workers for ingestion and retrieval, plus MCP servers
+- `docker-compose.yml`: local infra (Postgres, Redis, MinIO, Qdrant, Neo4j, MongoDB, Ollama, Langfuse)
 
-- `client`: Next.js frontend app
-- `Gateway`: Express + Prisma API and Socket.IO bridge
-- `ai-service`: Python ingestion/retrieval workers and MCP servers
-- `docker-compose.yml`: local infrastructure stack
-
-## 2. System Design (Deep View)
-
-This section gives in-depth diagrams for architecture and communication.
-
-### 2.1 Container-Level Architecture
-
-```mermaid
-flowchart TB
-    classDef node fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-    classDef runtime fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-    classDef store fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-    classDef obs fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-
-    subgraph L1[Level 1 - User]
-      USER[User Browser]
-    end
-
-    subgraph L2[Level 2 - Interface]
-      CLIENT[Client App<br/>Next.js + React<br/>Port 3400]
-    end
-
-    subgraph L3[Level 3 - Gateway]
-      GATEWAY[Gateway API<br/>Express + Prisma + Socket.IO<br/>Port 4000]
-    end
-
-    subgraph L4[Level 4 - Async Runtime]
-      REDIS[(Redis<br/>Queue + PubSub)]
-      INGEST[Ingestion Worker<br/>src.ingestion.worker]
-      QUERY[Query Worker<br/>src.retrieval.query_worker]
-      QMCP[Qdrant MCP<br/>Port 8001]
-      NMCP[Neo4j MCP<br/>Port 8002]
-    end
-
-    subgraph L5[Level 5 - Data Plane]
-      POSTGRES[(PostgreSQL<br/>users sessions docs jobs messages)]
-      MINIO[(MinIO<br/>pdf objects)]
-      QDRANT[(Qdrant<br/>vector index)]
-      NEO4J[(Neo4j<br/>knowledge graph)]
-      MONGO[(MongoDB optional<br/>checkpointing)]
-    end
-
-    subgraph L6[Level 6 - Observability]
-      LANGFUSE[(Langfuse<br/>traces)]
-    end
-
-    USER --> CLIENT
-    CLIENT -->|REST + Socket.IO| GATEWAY
-
-    GATEWAY -->|state| POSTGRES
-    GATEWAY -->|file objects| MINIO
-    GATEWAY -->|enqueue + publish| REDIS
-    GATEWAY -->|stream forwarding| CLIENT
-
-    REDIS -->|document-ingestion jobs| INGEST
-    REDIS -->|query:request:*| QUERY
-
-    INGEST -->|metadata + status| POSTGRES
-    INGEST -->|read source| MINIO
-    INGEST -->|vector + graph writes| QMCP
-    INGEST -->|graph writes| NMCP
-
-    QUERY -->|message persistence| POSTGRES
-    QUERY -->|stream + checkpoints| REDIS
-    QUERY -->|checkpoints| MONGO
-    QUERY -->|retrieval calls| QMCP
-    QUERY -->|retrieval calls| NMCP
-
-    QMCP -->|Qdrant ops| QDRANT
-    NMCP -->|Neo4j ops| NEO4J
-
-    INGEST --> LANGFUSE
-    QUERY --> LANGFUSE
-
-    class USER,CLIENT,GATEWAY node
-    class INGEST,QUERY,QMCP,NMCP runtime
-    class POSTGRES,REDIS,MINIO,QDRANT,NEO4J,MONGO store
-    class LANGFUSE obs
-```
-
-### 2.2 Ingestion Pipeline (Internal Components)
-
-```mermaid
-flowchart TB
-  classDef stage fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-  classDef decision fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-  classDef store fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-
-    JOB[Load job payload]
-    START[Set IN_PROGRESS]
-    FETCH[Fetch PDF]
-    PARSE[Parse PDF]
-    CHUNK[Chunk + metadata]
-    GRAPH[Extract graph]
-    VECTOR[Create embeddings]
-  D1{Extraction Valid?}
-    UPV[Upsert vectors]
-    UPG[Upsert graph]
-    FINAL[Finalize COMPLETED]
-    FAIL[Finalize FAILED]
-
-  PG[(PostgreSQL)]
-  MN[(MinIO)]
-  QD[(Qdrant)]
-  N4[(Neo4j)]
-    RD[(Redis)]
-
-    subgraph PIPE[Worker pipeline]
-      JOB --> START --> FETCH --> PARSE --> CHUNK --> GRAPH --> VECTOR --> D1
-      D1 -->|yes| UPV
-      D1 -->|yes| UPG
-      D1 -->|no| FAIL
-      UPV --> FINAL
-      UPG --> FINAL
-    end
-
-    FETCH -->|read| MN
-  UPV --> QD
-  UPG --> N4
-
-    START -->|set processing| PG
-    FINAL -->|set ready| PG
-    FAIL -->|set failed| PG
-
-    START -->|job status| RD
-    FINAL -->|job completed| RD
-    FAIL -->|job failed| RD
-
-  class JOB,START,FETCH,PARSE,CHUNK,GRAPH,VECTOR,UPV,UPG,FINAL,FAIL stage
-  class D1 decision
-  class PG,MN,QD,N4,RD store
-```
-
-### 2.3 Retrieval + Generation Pipeline (LangGraph)
-
-```mermaid
-flowchart TB
-    classDef node fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-    classDef decision fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-    classDef io fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-
-  START([Query Request]) --> LOAD[Load Session Context\nchat history + metadata]
-  LOAD --> SUP[Supervisor\nintent strategy entities]
-  SUP --> RW[Rewriter\nnormalize legal phrasing]
-
-  RW --> D1{Need decomposition?}
-  D1 -->|yes| DEC[Decomposer\nsub-query list]
-  D1 -->|no| ORCH[MCP Orchestrator\nparallel retrieval]
-  DEC --> ORCH
-
-  ORCH --> QCALL[Qdrant MCP calls\nvector_search filter]
-  ORCH --> NCALL[Neo4j MCP calls\ngraph_traverse extract_entity]
-  QCALL --> QRES[(Vector Candidates)]
-  NCALL --> NRES[(Graph Candidates)]
-
-  QRES --> BF[Bridge Fusion\nRRF + rerank + dedupe]
-  NRES --> BF
-  BF --> CRAG[CRAG Evaluator\nquality and sufficiency]
-  CRAG --> D2{Context sufficient?}
-  D2 -->|no and retry budget exists| RW
-  D2 -->|yes or retry budget exhausted| GEN[Generator\ncompose grounded answer]
-
-  GEN --> HCHK[Faithfulness Check\nhallucination gate]
-  HCHK --> D3{Passes quality gate?}
-  D3 -->|yes| TOK[stream:token]
-  D3 -->|yes| SRC[stream:sources]
-  D3 -->|yes| FIN[stream:done]
-  D3 -->|no| ERR[stream:error]
-
-  class START,LOAD,SUP,RW,DEC,ORCH,BF,CRAG,GEN,HCHK node
-  class D1,D2,D3 decision
-  class TOK,SRC,FIN,ERR,QCALL,NCALL,QRES,NRES io
-```
-
-### 2.4 Communication Contracts and Channels
+## High-Level Architecture
 
 ```mermaid
 flowchart LR
-  classDef req fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-  classDef evt fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-  classDef q fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
+	UI[Client Next.js App] -->|REST + Cookies| GW[Gateway API + Socket.IO]
 
-    subgraph REQ[Request path]
-      C[Client] -->|POST /api/v1/documents/upload| G[Gateway]
-      C -->|POST /api/v1/sessions/:sessionId/query| G
-    end
+	GW --> PG[(PostgreSQL)]
+	GW --> RE[(Redis)]
+	GW --> MQ[(BullMQ)]
+	GW --> MI[(MinIO)]
 
-    subgraph BUS[Redis channels]
-      R[(Redis)]
-    end
+	MQ --> IW[Ingestion Worker]
+	IW --> QD[(Qdrant)]
+	IW --> N4[(Neo4j)]
+	IW --> PG
+	IW --> RE
 
-    subgraph WORKERS[Consumers]
-      IW[Ingestion Worker]
-      QW[Query Worker]
-    end
-
-    G -->|enqueue document-ingestion| R
-    R -->|consume queue| IW
-    IW -->|job:progress + job:status| R
-
-    G -->|publish query:request:sessionId| R
-    R -->|consume query:request:*| QW
-    QW -->|query:stream:sessionId\nstream:token| R
-    QW -->|query:stream:sessionId\nstream:sources| R
-    QW -->|query:stream:sessionId\nstream:done| R
-    QW -->|query:stream:sessionId\nstream:error| R
-
-    R -->|Gateway subscribes and bridges| G
-    G -->|Socket.IO room forwarding| C
-
-  class C,G,IW,QW req
-  class R q
+	GW -->|query:request| RE
+	RE --> QW[Query Worker]
+	QW --> QMCP[Qdrant MCP Server]
+	QW --> NMCP[Neo4j MCP Server]
+	QMCP --> QD
+	NMCP --> N4
+	QW --> PG
+	QW -->|stream events| RE
+	RE --> GW
+	GW -->|token stream| UI
 ```
 
-## 3. Ingestion Workflow (Execution Timeline)
-
-Ingestion starts when a user uploads a PDF in the client.
+## System Design Diagram 1: Ingestion Workflow
 
 ```mermaid
 flowchart TB
-  classDef phase fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-  classDef action fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-  classDef store fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-  classDef decision fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
+	classDef step fill:#ffffff,stroke:#374151,stroke-width:1.5,color:#111827
+	classDef io fill:#f8fbff,stroke:#1d4ed8,stroke-width:1.5,color:#1e3a8a
+	classDef store fill:#fffef8,stroke:#92400e,stroke-width:1.5,color:#7c2d12
 
-  subgraph P1[Phase 1 - Upload and Queue]
-    direction TB
-    C1[Client uploads PDF] --> G1[Gateway stores PDF in MinIO]
-    G1 --> G2[Gateway creates document and queued job in PostgreSQL]
-    G2 --> G3[Gateway enqueues ingestion job in Redis BullMQ]
-    G3 --> C2[Gateway returns 202 to client]
-  end
+	A[Client uploads PDF]:::step --> B[Gateway stores object in MinIO\nand creates Document + Job QUEUED]:::step
+	B --> C[Gateway adds BullMQ job\nqueue=document-ingestion\nname=process-document]:::step
+	C --> D[IngestionWorker process_job]:::step
 
-  subgraph P2[Phase 2 - Worker Processing]
-    direction TB
-    W1[Ingestion worker consumes job] --> W2[Set processing state]
-    W2 --> W3[Download PDF]
-    W3 --> W4[Parse and chunk]
-    W4 --> W5[Extract entities and relations]
-  end
+	D --> E[Validate payload: jobId/documentId/pdfUrl]:::step
+	E --> F[Set Job IN_PROGRESS\nSet Document PROCESSING]:::step
+	F --> G[Download PDF from MinIO URL\nminio://bucket/key to temp file]:::step
 
-  subgraph P3[Phase 3 - Parallel Indexing]
-    direction LR
-    W5 --> V1[Upsert vectors in Qdrant]
-    W5 --> N1[Upsert graph in Neo4j]
-  end
+	G --> H[Pipeline stage: parse_pdf\nLlamaParse markdown extraction]:::step
+	H --> I[Pipeline stage: chunk\nDocumentChunker with metadata]:::step
+	I --> J[Pipeline stage: parallel_extract_and_index]:::step
 
-  subgraph P4[Phase 4 - Finalize and Notify]
-    direction TB
-    D1{Ingestion result}
-    D1 -->|success| S1[Set completed and ready in PostgreSQL]
-    D1 -->|failure| F1[Set failed in PostgreSQL]
-    S1 --> S2[Publish job completed in Redis]
-    F1 --> F2[Publish job failed in Redis]
-    S2 --> C3[Gateway forwards status via socket room]
-    F2 --> C3
-  end
+	J --> K[VectorIndexer indexes all chunks\nHuggingFace dense + Splade sparse -> Qdrant]:::step
+	J --> L[GraphExtractor on high-value chunks\nimportance >= 2 fallback all]:::step
 
-  W1 --> D1
+	L --> M[Neo4jService create_document_node + store_graph_documents]:::step
+	K --> N[Finalize job/document status]:::step
+	M --> N
 
-  class C1,C2,C3,G1,G2,G3,W1,W2,W3,W4,W5,V1,N1,S1,S2,F1,F2 action
-  class D1 decision
+	N --> O[Set Job COMPLETED\nSet Document READY]:::step
+	O --> P[Publish job progress/status events]:::step
+
+	Q[(PostgreSQL)]:::store
+	R[(MinIO)]:::store
+	S[(Qdrant)]:::store
+	T[(Neo4j)]:::store
+	U[(Redis)]:::io
+
+	F --> Q
+	G --> R
+	K --> S
+	M --> T
+	P --> U
 ```
 
-## 4. Query Retrieval and Streaming Workflow (Execution Timeline)
-
-Retrieval starts when the user asks a question in a READY session.
+## System Design Diagram 2: Retrieval Workflow
 
 ```mermaid
 flowchart TB
-  classDef phase fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-  classDef action fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-  classDef io fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
-  classDef decision fill:#ffffff,stroke:#374151,stroke-width:2,color:#111827
+	classDef node fill:#ffffff,stroke:#374151,stroke-width:1.5,color:#111827
+	classDef dec fill:#f8fbff,stroke:#1d4ed8,stroke-width:1.5,color:#1e3a8a
 
-  subgraph Q1[Phase 1 - Request and Dispatch]
-    direction TB
-    A1[Client submits question] --> A2[Gateway validates auth ownership rate limit]
-    A2 --> A3[Gateway publishes query request to Redis]
-    A3 --> A4[Query worker consumes request]
-    A4 --> A5[Persist user message in PostgreSQL]
-  end
+	A([Start]) --> B[supervisor]:::node
+	B --> C[rewriter]:::node
 
-  subgraph Q2[Phase 2 - Retrieval]
-    direction TB
-    B1[Run LangGraph retrieval] --> B2[Supervisor and rewrite]
-    B2 --> B3[Qdrant MCP vector retrieval]
-    B2 --> B4[Neo4j MCP graph retrieval]
-    B3 --> B5[Fusion and rerank]
-    B4 --> B5
-    B5 --> D2{CRAG sufficient?}
-    D2 -->|no retry| B2
-    D2 -->|yes| B6[Generate grounded answer]
-  end
+	C --> D{route_after_rewriter}:::dec
+	D -->|complex query| E[decomposer]:::node
+	D -->|simple query| F[mcp_orchestrator]:::node
+	E --> F
 
-  subgraph Q3[Phase 3 - Stream and Finalize]
-    direction TB
-    B6 --> C1[Publish stream token events]
-    C1 --> C2[Publish stream sources]
-    C2 --> C3[Persist AI message in PostgreSQL]
-    C3 --> D3{Generation result}
-    D3 -->|success| C4[Publish stream done]
-    D3 -->|failure| C5[Publish stream error]
-    C4 --> C6[Gateway forwards stream to session room]
-    C5 --> C6
-  end
+	F --> G[bridge_fusion]:::node
+	G --> H[crag_evaluator]:::node
 
-  A5 --> B1
+	H --> I{route_after_crag}:::dec
+	I -->|sufficient| J[generator]:::node
+	I -->|insufficient and crag_iteration < 2| C
+	I -->|partial or crag_iteration >= 2| J
 
-  class A1,A2,A3,A4,A5,B1,B2,B3,B4,B5,B6,C1,C2,C3,C4,C5,C6 action
-  class D2,D3 decision
+	J --> K([End])
 ```
 
-## 5. LangGraph Retrieval Design
+## Tech Stack
 
-The query worker uses a LangGraph state machine in `ai-service/src/retrieval/graph.py`.
+- Frontend: Next.js 16, React 19, TypeScript, Zustand, Socket.IO client
+- Gateway: Node.js, Express, Prisma, BullMQ, Redis, MinIO, Socket.IO
+- AI Service: Python, LangGraph, LangChain, LlamaParse, Qdrant, Neo4j
+- Infrastructure: Docker Compose
 
-Core nodes:
+## Monorepo Structure
 
-- Supervisor: classify intent, strategy, entities
-- Rewriter: normalize query for recall and grounding
-- Decomposer: split complex legal asks into atomic sub-queries
-- MCP Orchestrator: parallel Qdrant and Neo4j retrieval calls
-- Bridge Fusion: combine graph-linked chunks + vector hits with RRF
-- CRAG Evaluator: decide sufficient/partial/insufficient context
-- Generator: stream answer, attach sources, run hallucination checker
+```text
+PolyGot/
+  client/          # Frontend app
+  Gateway/         # API gateway service
+  ai-service/      # Ingestion + retrieval workers + MCP servers
+  diagrams/        # Mermaid diagrams
+  docker-compose.yml
+```
 
-High-level route logic:
+## Prerequisites
 
-- `supervisor -> rewriter`
-- `rewriter -> decomposer` for multi-part questions, otherwise direct retrieval
-- `... -> mcp_orchestrator -> bridge_fusion -> crag_evaluator`
-- CRAG can retry rewrite on insufficient evidence
-- Final response generated only after context gate
+- Docker Desktop (or Docker Engine + Compose)
+- Node.js 20+
+- npm
+- Python 3.11+ (recommended)
 
-## 6. Tech Stack by Layer
+## Quick Start (Local Development)
 
-Client:
-
-- Next.js 16, React 19, TypeScript
-- Zustand state management
-- Axios + cookie auth
-- Socket.IO client for live events
-
-Gateway:
-
-- Express 5, TypeScript
-- Prisma + PostgreSQL
-- Redis + BullMQ queue producer
-- MinIO document storage
-- Socket.IO Redis-stream bridge
-- TypeBox + AJV validation
-
-AI service:
-
-- FastAPI MCP servers
-- BullMQ Python worker consumers
-- LangGraph orchestration
-- LangChain + OpenAI models
-- LlamaParse for PDF parsing
-- Qdrant dense+sparse hybrid retrieval
-- Neo4j graph extraction/traversal
-- Langfuse observability
-- MongoDB optional checkpoint backend
-
-Infrastructure:
-
-- PostgreSQL
-- Redis
-- MinIO
-- Qdrant
-- Neo4j
-- MongoDB
-- Langfuse
-- Ollama (optional)
-
-## 7. Performance and Reliability Boosts
-
-Implemented optimization patterns include:
-
-- Parallel retrieval calls (Qdrant + Neo4j) through MCP orchestrator
-- Reciprocal Rank Fusion plus rerank for quality boost
-- Singleton/shared clients for Redis, DB, and MCP HTTP transport
-- Worker heartbeat checks before query dispatch
-- Retry and timeout logic around external model/tool calls
-- Cache-assisted session/document reads in Gateway
-- Graceful shutdown and cancellation handling in workers
-- Best-effort stale-data cleanup in Qdrant and Neo4j on document delete
-
-## 8. API and Event Contracts
-
-Gateway API docs:
-
-- `Gateway/Api docs.md`
-
-Client docs:
-
-- `client/README.md`
-
-AI service docs:
-
-- `ai-service/README.md`
-
-Key query stream events:
-
-- `stream:token`
-- `stream:sources`
-- `stream:done`
-- `stream:error`
-
-Key job events:
-
-- `job:progress`
-- `job:status`
-
-## 9. Local Setup (Full Stack)
-
-### 9.1 Start infrastructure
+### 1) Start infrastructure
 
 From repository root:
 
 ```powershell
-docker compose up -d
+docker-compose up -d
 ```
 
-### 9.2 Start Gateway
+This starts:
+
+- PostgreSQL (`5432`)
+- Redis (`6379`)
+- MinIO (`9000`, console `9001`)
+- Qdrant (`6333`)
+- Neo4j (`7474`, bolt `7687`)
+- MongoDB (`27017`)
+- Ollama (`11434`)
+- Langfuse (`3300`)
+
+### 2) Configure and run Gateway
 
 ```powershell
 cd Gateway
 npm install
-npm run dev
 ```
 
-### 9.3 Start Client
+Create `Gateway/.env` with at least:
+
+```env
+NODE_ENV=development
+PORT=4000
+FRONTEND_URL=http://localhost:3400
+
+DATABASE_URL=postgresql://gateway_user:gateway_secure_pass_2024@localhost:5432/gateway_db
+
+JWT_SECRET=replace_with_a_32_plus_character_secret
+JWT_EXPIRES_IN=7d
+
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=example_user
+SMTP_PASS=example_password
+
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=gateway_redis_pass_2024
+
+MINIO_ENDPOINT=localhost
+MINIO_PORT=9000
+MINIO_USE_SSL=false
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+MINIO_BUCKET_NAME=documents
+
+QDRANT_MCP_URL=http://localhost:8001
+NEO4J_MCP_URL=http://localhost:8002
+MCP_AUTH_KEY=optional_shared_key
+```
+
+Run migrations and start:
 
 ```powershell
-cd client
-npm install
+npx prisma migrate deploy
 npm run dev
 ```
 
-### 9.4 Start AI Service processes
+Gateway will run at `http://localhost:4000`.
 
-In separate terminals:
+### 3) Configure and run AI service
 
 ```powershell
 cd ai-service
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+copy .env.example .env
+```
+
+Update `ai-service/.env` values, especially:
+
+- `LLAMA_CLOUD_API_KEY`
+- `OPENAI_API_KEY`
+- `MCP_AUTH_KEY` (if used)
+
+Start 4 processes in separate terminals:
+
+```powershell
 python -m src.mcp_servers.qdrant_mcp_server
 ```
 
 ```powershell
-cd ai-service
 python -m src.mcp_servers.neo4j_mcp_server
 ```
 
 ```powershell
-cd ai-service
 python -m src.ingestion.worker
 ```
 
 ```powershell
-cd ai-service
 python -m src.retrieval.query_worker
 ```
 
-## 10. Typical User Journey
+### 4) Configure and run client
 
-1. User logs in.
-2. User creates a session.
-3. User uploads one PDF to the session.
-4. Client receives ingestion progress updates in real time.
-5. Once status is READY, user asks a question.
-6. Client receives streamed answer tokens and final cited response.
+```powershell
+cd client
+npm install
+```
 
-## 11. Security and Controls
+Create `client/.env.local`:
 
-- JWT auth with httpOnly cookie handling
-- Protected API routes with ownership checks
-- Query endpoint per-user rate limiting (20 queries/min)
-- Upload endpoint type and size validation (PDF, max 50MB)
-- MCP server API-key gate for tool calls
+```env
+NEXT_PUBLIC_API_URL=http://localhost:4000/api/v1
+```
 
-## 12. Contribution Notes
+Start frontend:
 
-When making changes:
+```powershell
+npm run dev
+```
 
-- Keep contracts backward compatible between client, gateway, and ai-service
-- Update component-level docs in each service README
-- Update `Gateway/Api docs.md` for any endpoint/event changes
-- Include migration notes when changing DB schema or message/event shape
+Client will run at `http://localhost:3400`.
 
-## 13. License and Internal Use
+## Runtime Flow Summary
 
-Add your project license policy here (MIT/Apache-2.0/Internal).
+1. User uploads PDF from client.
+2. Gateway stores the file in MinIO and enqueues ingestion via BullMQ.
+3. Ingestion worker parses, chunks, embeds, and writes data to Qdrant/Neo4j.
+4. User asks a question in the session chat.
+5. Gateway publishes query request to Redis.
+6. Query worker runs retrieval graph and publishes streaming events.
+7. Gateway forwards streaming response to client via Socket.IO.
+
+## Key Ports
+
+- Client: `3400`
+- Gateway: `4000`
+- Qdrant MCP: `8001`
+- Neo4j MCP: `8002`
+- PostgreSQL: `5432`
+- Redis: `6379`
+- MinIO API: `9000`
+- MinIO Console: `9001`
+- Qdrant: `6333`
+- Neo4j Browser: `7474`
+- Neo4j Bolt: `7687`
+- MongoDB: `27017`
+- Ollama: `11434`
+- Langfuse: `3300`
+
+## Useful Commands
+
+From project root:
+
+```powershell
+docker-compose up -d
+docker-compose ps
+docker-compose logs -f
+docker-compose down
+```
+
+Gateway:
+
+```powershell
+cd Gateway
+npm run dev
+```
+
+Client:
+
+```powershell
+cd client
+npm run dev
+```
+
+AI service:
+
+```powershell
+cd ai-service
+.\venv\Scripts\Activate.ps1
+python -m src.ingestion.worker
+python -m src.retrieval.query_worker
+```
+
+## Troubleshooting
+
+- If login/upload fails, check `NEXT_PUBLIC_API_URL` and `FRONTEND_URL` alignment (`3400` vs `4000`).
+- If ingestion does not start, verify Gateway is connected to Redis and BullMQ queue is initialized.
+- If status updates do not appear, verify Redis pub/sub and Gateway Socket.IO bridge are running.
+- If retrieval fails, verify both MCP servers are running on `8001` and `8002`.
+- If vector/graph look empty, verify Qdrant and Neo4j containers are healthy.
+
+## License
+
+This project currently has no explicit open-source license file.

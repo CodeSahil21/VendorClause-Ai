@@ -64,3 +64,4 @@ Gateway/prisma/migrations/
 # Documentation and config (EXCLUDE from git)
 *.yml
 *.yaml
+diagrams
