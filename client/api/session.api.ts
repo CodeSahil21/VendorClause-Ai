@@ -6,7 +6,8 @@ import type {
   SessionResponse, 
   SessionWithDocumentResponse,
   SessionsListResponse,
-  QuerySessionResponse
+  QuerySessionResponse,
+  ChatMessage
 } from "@/types/session.types";
 import type { ApiSuccessResponse } from "@/types/auth.types";
 
@@ -66,6 +67,18 @@ export const sessionApi = {
       return response.data.data;
     } catch (error) {
       throw new Error(handleAxiosError(error, 'Failed to submit query'));
+    }
+  },
+
+  getChatHistory: async (sessionId: string, limit: number = 50): Promise<ChatMessage[]> => {
+    try {
+      const response = await axiosInstance.get<ApiSuccessResponse<ChatMessage[]>>(
+        `/sessions/${sessionId}/messages`,
+        { params: { limit } }
+      );
+      return response.data.data;
+    } catch (error) {
+      throw new Error(handleAxiosError(error, 'Failed to fetch chat history'));
     }
   },
 };

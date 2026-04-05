@@ -70,3 +70,9 @@ export interface QuerySessionResponse {
   queued: boolean;
   sessionId: string;
 }
+
+export interface ChatMessage {
+  role: string;
+  content: string;
+  createdAt: string;
+}
