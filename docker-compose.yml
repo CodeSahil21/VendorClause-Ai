@@ -11,6 +11,7 @@ services:
       POSTGRES_DB: gateway_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U gateway_user -d gateway_db']
       interval: 10s
@@ -85,6 +86,23 @@ services:
       timeout: 5s
       retries: 5
 
+  mongodb:
+    image: mongo:7
+    container_name: gateway_mongodb
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: langgraph
+      MONGO_INITDB_ROOT_PASSWORD: langgraph_pass_2024
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--username', 'langgraph', '--password', 'langgraph_pass_2024', '--authenticationDatabase', 'admin', '--eval', 'db.runCommand({ ping: 1 }).ok']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   ollama:
     image: ollama/ollama:latest
     container_name: gateway_ollama
@@ -104,12 +122,12 @@ services:
     container_name: gateway_langfuse
     restart: unless-stopped
     ports:
-      - '3040:3000'
+      - '3300:3000'
     environment:
       DATABASE_URL: postgresql://gateway_user:gateway_secure_pass_2024@postgres:5432/langfuse_v2_db
-      NEXTAUTH_SECRET: your-nextauth-secret-change-me
-      NEXTAUTH_URL: http://localhost:3040
-      SALT: your-salt-change-me
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?LANGFUSE_NEXTAUTH_SECRET is required}
+      NEXTAUTH_URL: http://localhost:3300
+      SALT: ${LANGFUSE_SALT:?LANGFUSE_SALT is required}
       TELEMETRY_ENABLED: 'false'
     depends_on:
       postgres:
@@ -130,6 +148,8 @@ volumes:
   qdrant_data:
     driver: local
   neo4j_data:
+    driver: local
+  mongodb_data:
     driver: local
   ollama_data:
     driver: local
