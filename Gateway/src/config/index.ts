@@ -60,4 +60,9 @@ export const env = {
   MINIO_ACCESS_KEY: requiredEnvVars.MINIO_ACCESS_KEY!,
   MINIO_SECRET_KEY: requiredEnvVars.MINIO_SECRET_KEY!,
   MINIO_BUCKET_NAME: process.env.MINIO_BUCKET_NAME || 'documents',
+
+  // AI-service MCP endpoints (used for document cleanup on delete)
+  QDRANT_MCP_URL: process.env.QDRANT_MCP_URL || 'http://localhost:8001',
+  NEO4J_MCP_URL: process.env.NEO4J_MCP_URL || 'http://localhost:8002',
+  MCP_AUTH_KEY: process.env.MCP_AUTH_KEY || '',
 };
