@@ -1,19 +1,25 @@
+# Standard library
 from collections import defaultdict
+import threading
 from typing import Any
 
+# Third-party
+from qdrant_client import models as qdrant_models
+from sentence_transformers import CrossEncoder
+
+# Local
 from src.shared.settings import settings
 
-_cross_encoder: Any | None = None
+_cross_encoder: CrossEncoder | None = None
+_cross_encoder_lock = threading.Lock()
 
 
-def _get_cross_encoder() -> Any:
+def _get_cross_encoder() -> CrossEncoder:
     global _cross_encoder
     if _cross_encoder is None:
-        try:
-            from sentence_transformers import CrossEncoder
-        except Exception as exc:
-            raise RuntimeError("sentence-transformers is required for rerank()") from exc
-        _cross_encoder = CrossEncoder(settings.cross_encoder_model)
+        with _cross_encoder_lock:
+            if _cross_encoder is None:
+                _cross_encoder = CrossEncoder(settings.cross_encoder_model)
     return _cross_encoder
 
 
@@ -35,47 +41,46 @@ async def bridge(
     qdrant_client: Any,
     collection_name: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Fetch full chunk payloads for Neo4j chunk_ids from Qdrant.
-
-    Expects qdrant_client to expose async scroll(collection_name=..., scroll_filter=..., limit=...)
-    compatible with AsyncQdrantClient.
-    """
+    """Fetch full chunk payloads for Neo4j chunk_ids from Qdrant."""
     if not neo4j_chunk_ids:
         return []
 
-    try:
-        from qdrant_client import models
-    except Exception as exc:
-        raise RuntimeError("qdrant-client is required for bridge()") from exc
-
-    filter_by_ids = models.Filter(
+    filter_by_ids = qdrant_models.Filter(
         must=[
-            models.FieldCondition(
+            qdrant_models.FieldCondition(
                 key="chunk_id",
-                match=models.MatchAny(any=neo4j_chunk_ids),
+                match=qdrant_models.MatchAny(any=neo4j_chunk_ids),
             )
         ]
     )
 
     target_collection = collection_name or settings.qdrant_collection_name
-
-    points, _ = await qdrant_client.scroll(
-        collection_name=target_collection,
-        scroll_filter=filter_by_ids,
-        limit=max(len(neo4j_chunk_ids), 1),
-    )
-
     bridged: list[dict[str, Any]] = []
-    for point in points:
-        payload = point.payload or {}
-        bridged.append(
-            {
-                "chunk_id": payload.get("chunk_id"),
-                "text": payload.get("text", ""),
-                "clause_type": payload.get("clause_type"),
-                "importance": payload.get("importance"),
-            }
+    offset = None
+
+    while True:
+        points, next_offset = await qdrant_client.scroll(
+            collection_name=target_collection,
+            scroll_filter=filter_by_ids,
+            limit=50,
+            offset=offset,
         )
+
+        for point in points:
+            payload = point.payload or {}
+            bridged.append(
+                {
+                    "chunk_id": payload.get("chunk_id"),
+                    "text": payload.get("text", ""),
+                    "clause_type": payload.get("clause_type"),
+                    "importance": payload.get("importance"),
+                }
+            )
+
+        if next_offset is None:
+            break
+        offset = next_offset
+
     return bridged
 
 
@@ -115,33 +120,25 @@ def rerank(query: str, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not chunks:
         return []
 
-    model = _get_cross_encoder()
-    pairs = [(query, chunk.get("text", "")) for chunk in chunks]
-    scores = model.predict(pairs)
+    non_empty = [chunk for chunk in chunks if str(chunk.get("text", "")).strip()]
+    empty = [chunk for chunk in chunks if not str(chunk.get("text", "")).strip()]
+
+    if not non_empty:
+        return [{**chunk, "rerank_score": 0.0} for chunk in chunks]
+
+    pairs = [(query, chunk.get("text", "")) for chunk in non_empty]
+    scores = _get_cross_encoder().predict(pairs)
 
     reranked: list[dict[str, Any]] = []
-    for chunk, score in zip(chunks, scores):
+    for chunk, score in zip(non_empty, scores):
         row = dict(chunk)
         row["rerank_score"] = float(score)
         reranked.append(row)
 
     reranked.sort(key=lambda x: x["rerank_score"], reverse=True)
+    for chunk in empty:
+        row = dict(chunk)
+        row["rerank_score"] = 0.0
+        reranked.append(row)
+
     return reranked
-
-
-def test_rrf_math() -> None:
-    """Quick mock test to validate RRF ordering."""
-    list_a = [
-        {"chunk_id": "c1", "text": "A"},
-        {"chunk_id": "c2", "text": "B"},
-        {"chunk_id": "c3", "text": "C"},
-    ]
-    list_b = [
-        {"chunk_id": "c2", "text": "B"},
-        {"chunk_id": "c4", "text": "D"},
-        {"chunk_id": "c1", "text": "A"},
-    ]
-
-    fused = reciprocal_rank_fusion([list_a, list_b], k=60, top_k=4)
-    assert fused[0]["chunk_id"] in {"c1", "c2"}
-    assert len(fused) == 4

@@ -1,11 +1,14 @@
+# Standard library
 import asyncio
 import logging
 import time
 from dataclasses import dataclass
 from typing import Any
 
+# Third-party
 import httpx
 
+# Local
 from src.shared.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -28,7 +31,17 @@ class MCPClient:
             "qdrant": settings.qdrant_mcp_url,
             "neo4j": settings.neo4j_mcp_url,
         }
-        self._last_sse_ok: dict[str, float] = {}
+        self._last_health_ok: dict[str, float] = {}
+        self._request_headers = {
+            "X-API-Key": settings.mcp_auth_key,
+        }
+        self._http_client = httpx.AsyncClient(
+            timeout=self.timeout_seconds,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+
+    async def aclose(self) -> None:
+        await self._http_client.aclose()
 
     def _resolve_server_url(self, server: str) -> str:
         if server.startswith("http://") or server.startswith("https://"):
@@ -37,66 +50,48 @@ class MCPClient:
             raise ValueError(f"Unknown MCP server '{server}'. Expected one of: {list(self._server_urls.keys())}")
         return self._server_urls[server].rstrip("/")
 
-    async def connect_sse(self, url: str, max_retries: int = 2) -> None:
-        """Best-effort SSE connect with simple reconnection handling.
-
-        Current MCP servers emit a session_start event and close quickly, so this
-        method only verifies the endpoint is reachable.
-        """
+    async def _check_health(self, base_url: str, max_retries: int = 2) -> None:
         last_error: Exception | None = None
-        sse_url = f"{url.rstrip('/')}/sse"
-
         for attempt in range(1, max_retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                    async with client.stream("GET", sse_url) as response:
-                        response.raise_for_status()
-                        async for line in response.aiter_lines():
-                            if line:
-                                self._last_sse_ok[url.rstrip("/")] = time.monotonic()
-                                return
-                        self._last_sse_ok[url.rstrip("/")] = time.monotonic()
-                        return
+                response = await self._http_client.get(f"{base_url}/health")
+                response.raise_for_status()
+                self._last_health_ok[base_url] = time.monotonic()
+                return
             except Exception as exc:
                 last_error = exc
-                logger.warning(
-                    "SSE connect failed (attempt %d/%d) for %s: %s",
-                    attempt,
-                    max_retries,
-                    sse_url,
-                    exc,
-                )
                 if attempt < max_retries:
-                    await asyncio.sleep(0.3 * attempt)
-
+                    await asyncio.sleep(0.2 * attempt)
         if last_error:
             raise last_error
 
-    def _needs_sse_healthcheck(self, base_url: str) -> bool:
-        last_ok = self._last_sse_ok.get(base_url)
+    def _needs_http_healthcheck(self, base_url: str) -> bool:
+        last_ok = self._last_health_ok.get(base_url)
         if last_ok is None:
             return True
         return (time.monotonic() - last_ok) > self.sse_health_ttl_seconds
 
     async def call_tool(self, server: str, tool_name: str, params: dict[str, Any]) -> Any:
-        """Open SSE, call /messages, return decoded tool results."""
+        """Health-check (TTL gated), call /messages, return decoded tool results."""
         base_url = self._resolve_server_url(server)
 
-        # Validate SSE reachability first. Retry once around the full flow to
-        # handle transient drops between SSE connect and POST.
+        # Health-check server (TTL-gated). Retry once on transient failure.
         for attempt in range(1, 3):
             try:
-                if self._needs_sse_healthcheck(base_url):
-                    await self.connect_sse(base_url)
+                if self._needs_http_healthcheck(base_url):
+                    await self._check_health(base_url)
 
                 payload = {
                     "tool": tool_name,
                     "params": params,
                 }
-                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                    response = await client.post(f"{base_url}/messages", json=payload)
-                    response.raise_for_status()
-                    data = response.json()
+                response = await self._http_client.post(
+                    f"{base_url}/messages",
+                    json=payload,
+                    headers=self._request_headers,
+                )
+                response.raise_for_status()
+                data = response.json()
 
                 if not isinstance(data, dict):
                     raise ValueError("MCP server returned non-dict response")
