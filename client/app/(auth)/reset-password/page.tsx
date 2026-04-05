@@ -75,7 +75,7 @@ export default function ResetPasswordPage() {
   if (!email || !token) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600" />
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500" />
       </div>
     );
   }
@@ -83,17 +83,17 @@ export default function ResetPasswordPage() {
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="max-w-md w-full">
-        <div className="bg-white rounded-2xl shadow-xl p-8 sm:p-12">
+        <div className="bg-slate-950/85 rounded-2xl shadow-xl p-8 sm:p-12 border border-slate-700 backdrop-blur-md">
           <div className="text-center mb-8">
-            <Image src="/APP.png" alt="PolyGot" width={60} height={60} className="mx-auto rounded-full mb-4" />
-            <h2 className="text-3xl font-bold text-gray-900">Set new password</h2>
-            <p className="mt-2 text-sm text-gray-600">Enter your new password below</p>
+            <Image src="/APP.png" alt="PolyGot" width={60} height={60} className="mx-auto rounded-full mb-4 ring-4 ring-cyan-400/40" />
+            <h2 className="text-3xl font-bold text-slate-100">Set new password</h2>
+            <p className="mt-2 text-sm text-slate-300">Enter your new password below</p>
           </div>
 
           <form className="space-y-6" onSubmit={handleSubmit}>
             <div className="space-y-5">
               <div>
-                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+                <label htmlFor="password" className="block text-sm font-medium text-slate-200 mb-2">
                   New Password
                 </label>
                 <input
@@ -104,17 +104,17 @@ export default function ResetPasswordPage() {
                     setFormData({ ...formData, password: e.target.value });
                     setErrors({ ...errors, password: '' });
                   }}
-                  className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${errors.password ? 'border-red-500 bg-red-50' : 'border-gray-300 bg-white'}`}
+                  className={`w-full px-4 py-3 border rounded-lg text-slate-900! placeholder-slate-500! focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all ${errors.password ? 'border-red-500 bg-red-50' : 'border-slate-500 bg-slate-100'}`}
                   placeholder="••••••••"
                 />
                 {errors.password ? (
                   <p className="mt-2 text-xs text-red-600">{errors.password}</p>
                 ) : (
-                  <p className="mt-2 text-xs text-gray-500">Must be at least 6 characters</p>
+                  <p className="mt-2 text-xs text-slate-400">Must be at least 6 characters</p>
                 )}
               </div>
               <div>
-                <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-2">
+                <label htmlFor="confirmPassword" className="block text-sm font-medium text-slate-200 mb-2">
                   Confirm Password
                 </label>
                 <input
@@ -125,7 +125,7 @@ export default function ResetPasswordPage() {
                     setFormData({ ...formData, confirmPassword: e.target.value });
                     setErrors({ ...errors, confirmPassword: '' });
                   }}
-                  className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${errors.confirmPassword ? 'border-red-500 bg-red-50' : 'border-gray-300 bg-white'}`}
+                  className={`w-full px-4 py-3 border rounded-lg text-slate-900! placeholder-slate-500! focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all ${errors.confirmPassword ? 'border-red-500 bg-red-50' : 'border-slate-500 bg-slate-100'}`}
                   placeholder="••••••••"
                 />
                 {errors.confirmPassword && <p className="mt-2 text-xs text-red-600">{errors.confirmPassword}</p>}
@@ -135,7 +135,7 @@ export default function ResetPasswordPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3 px-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-medium rounded-lg hover:from-indigo-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl"
+              className="w-full py-3 px-4 bg-linear-to-r from-cyan-500 to-blue-600 text-white font-medium rounded-lg hover:from-cyan-600 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500 focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl"
             >
               {isLoading ? (
                 <span className="flex items-center justify-center">
@@ -149,7 +149,7 @@ export default function ResetPasswordPage() {
             </button>
 
             <div className="text-center">
-              <Link href="/login" className="text-sm font-medium text-indigo-600 hover:text-indigo-500 inline-flex items-center">
+              <Link href="/login" className="text-sm font-medium text-cyan-300 hover:text-cyan-200 inline-flex items-center">
                 <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                 </svg>

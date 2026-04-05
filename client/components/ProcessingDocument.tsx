@@ -38,22 +38,24 @@ export default function ProcessingDocument({ jobId, onComplete, onError }: Proce
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12">
+      <div className="bg-slate-950/85 rounded-2xl shadow-xl shadow-black/30 border border-slate-700 p-8 sm:p-12 backdrop-blur-sm">
         <div className="flex flex-col items-center justify-center">
-          <Loader2 className="h-16 w-16 text-indigo-600 animate-spin" />
-          <h2 className="mt-6 text-2xl font-semibold text-gray-900">Processing Document</h2>
-          <p className="mt-3 text-center text-gray-600 text-base">
+          <div className="h-18 w-18 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center">
+            <Loader2 className="h-10 w-10 text-cyan-300 animate-spin" />
+          </div>
+          <h2 className="mt-6 text-2xl font-semibold text-slate-100">Processing Document</h2>
+          <p className="mt-3 text-center text-slate-300 text-base">
             {getStatusMessage()}
           </p>
           <div className="mt-8 w-full max-w-md">
-            <div className="w-full bg-gray-200 rounded-full h-2">
+            <div className="w-full bg-slate-800 rounded-full h-2.5 border border-slate-700">
               <div 
-                className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
+                className="bg-linear-to-r from-cyan-500 to-blue-600 h-2 rounded-full transition-all duration-300"
                 style={{ width: `${Math.max(0, Math.min(100, progress || (status === 'QUEUED' ? 5 : 0)))}%` }}
               />
             </div>
           </div>
-          <p className="mt-4 text-sm text-gray-500">
+          <p className="mt-4 text-sm text-slate-400">
             Status: {status === 'QUEUED' ? 'Queued' : 'Processing'} ({Math.max(0, Math.min(100, progress || (status === 'QUEUED' ? 5 : 0)))}%)
           </p>
         </div>

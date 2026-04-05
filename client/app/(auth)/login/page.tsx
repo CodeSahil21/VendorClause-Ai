@@ -56,7 +56,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex animate-fadeIn">
       {/* Left Side - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 p-12 flex-col justify-between relative overflow-hidden">
+      <div className="hidden lg:flex lg:w-1/2 bg-linear-to-br from-slate-950 via-blue-900 to-cyan-900 p-12 flex-col justify-between relative overflow-hidden border-r border-cyan-800/40">
         {/* Decorative elements */}
         <div className="absolute inset-0 bg-black/10"></div>
         <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2"></div>
@@ -71,30 +71,30 @@ export default function LoginPage() {
             <span className="text-3xl font-bold text-white">VendorClause AI</span>
           </div>
           <h1 className="text-5xl font-bold text-white mb-4 leading-tight">AI-Powered Vendor Service Agreements</h1>
-          <p className="text-xl text-indigo-100">Streamline your vendor management with intelligent automation</p>
+          <p className="text-xl text-cyan-100">Streamline your vendor management with intelligent automation</p>
         </div>
         
         <div className="relative z-10 space-y-6">
           <div className="flex items-start space-x-4 p-4 bg-white/10 backdrop-blur-sm rounded-xl border border-white/20 hover:bg-white/20 transition-all">
-            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
               <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             </div>
             <div>
               <h3 className="text-white font-semibold text-lg mb-1">AI-Driven Insights</h3>
-              <p className="text-indigo-100 text-sm">Smart contract analysis and recommendations powered by advanced AI</p>
+              <p className="text-cyan-100 text-sm">Smart contract analysis and recommendations powered by advanced AI</p>
             </div>
           </div>
           <div className="flex items-start space-x-4 p-4 bg-white/10 backdrop-blur-sm rounded-xl border border-white/20 hover:bg-white/20 transition-all">
-            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
               <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
               </svg>
             </div>
             <div>
               <h3 className="text-white font-semibold text-lg mb-1">Secure & Compliant</h3>
-              <p className="text-indigo-100 text-sm">Enterprise-grade security for your sensitive agreements</p>
+              <p className="text-cyan-100 text-sm">Enterprise-grade security for your sensitive agreements</p>
             </div>
           </div>
         </div>
@@ -102,26 +102,26 @@ export default function LoginPage() {
 
       {/* Right Side - Form */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-12">
-        <div className="w-full max-w-md space-y-8">
+        <div className="w-full max-w-md space-y-8 rounded-2xl border border-slate-700/70 bg-slate-950/65 backdrop-blur-md p-6 sm:p-8 shadow-2xl shadow-black/30">
           <div className="text-center lg:hidden">
-            <Image src="/APP.png" alt="VendorClause AI" width={60} height={60} className="mx-auto rounded-full mb-4 ring-4 ring-indigo-100" />
-            <h2 className="text-3xl font-bold text-gray-900">Welcome back</h2>
-            <p className="mt-2 text-sm text-gray-600">Sign in to your account</p>
+            <Image src="/APP.png" alt="VendorClause AI" width={60} height={60} className="mx-auto rounded-full mb-4 ring-4 ring-cyan-400/40" />
+            <h2 className="text-3xl font-bold text-slate-100">Welcome back</h2>
+            <p className="mt-2 text-sm text-slate-300">Sign in to your account</p>
           </div>
           <div className="hidden lg:block">
-            <h2 className="text-4xl font-bold text-gray-900 mb-2">Welcome back</h2>
-            <p className="text-gray-600">Sign in to continue to VendorClause AI</p>
+            <h2 className="text-4xl font-bold text-slate-100 mb-2">Welcome back</h2>
+            <p className="text-slate-300">Sign in to continue to VendorClause AI</p>
           </div>
 
           <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
             <div className="space-y-5">
               <div>
-                <label htmlFor="email" className="block text-sm font-semibold text-gray-700 mb-2">
+                <label htmlFor="email" className="block text-sm font-semibold text-slate-200 mb-2">
                   Email address
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="h-5 w-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                     </svg>
                   </div>
@@ -133,7 +133,7 @@ export default function LoginPage() {
                       setFormData({ ...formData, email: e.target.value });
                       setErrors({ ...errors, email: '' });
                     }}
-                    className={`w-full pl-10 pr-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${errors.email ? 'border-red-500 bg-red-50' : 'border-gray-300 bg-white hover:border-gray-400'}`}
+                    className={`w-full pl-10 pr-4 py-3 border rounded-xl text-slate-900! placeholder-slate-500! focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all ${errors.email ? 'border-red-500 bg-red-50' : 'border-slate-500 bg-slate-100 hover:border-cyan-500/70'}`}
                     placeholder="you@example.com"
                   />
                 </div>
@@ -147,12 +147,12 @@ export default function LoginPage() {
                 )}
               </div>
               <div>
-                <label htmlFor="password" className="block text-sm font-semibold text-gray-700 mb-2">
+                <label htmlFor="password" className="block text-sm font-semibold text-slate-200 mb-2">
                   Password
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="h-5 w-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                     </svg>
                   </div>
@@ -164,13 +164,13 @@ export default function LoginPage() {
                       setFormData({ ...formData, password: e.target.value });
                       setErrors({ ...errors, password: '' });
                     }}
-                    className={`w-full pl-10 pr-12 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${errors.password ? 'border-red-500 bg-red-50' : 'border-gray-300 bg-white hover:border-gray-400'}`}
+                    className={`w-full pl-10 pr-12 py-3 border rounded-xl text-slate-900! placeholder-slate-500! focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all ${errors.password ? 'border-red-500 bg-red-50' : 'border-slate-500 bg-slate-100 hover:border-cyan-500/70'}`}
                     placeholder="••••••••"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200"
                   >
                     {showPassword ? (
                       <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -196,7 +196,7 @@ export default function LoginPage() {
             </div>
 
             <div className="flex items-center justify-end">
-              <Link href="/forgot-password" className="text-sm font-semibold text-indigo-600 hover:text-indigo-500 transition-colors">
+              <Link href="/forgot-password" className="text-sm font-semibold text-cyan-300 hover:text-cyan-200 transition-colors">
                 Forgot password?
               </Link>
             </div>
@@ -204,7 +204,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3.5 px-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-xl hover:from-indigo-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+              className="w-full py-3.5 px-4 bg-linear-to-r from-cyan-500 to-blue-600 text-white font-semibold rounded-xl hover:from-cyan-600 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500 focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
             >
               {isLoading ? (
                 <span className="flex items-center justify-center">
@@ -220,17 +220,17 @@ export default function LoginPage() {
 
           <div className="relative">
             <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-gray-300"></div>
+              <div className="w-full border-t border-slate-700"></div>
             </div>
             <div className="relative flex justify-center text-sm">
-              <span className="px-4 bg-white text-gray-500">New to VendorClause AI?</span>
+              <span className="px-4 bg-slate-950 text-slate-400">New to VendorClause AI?</span>
             </div>
           </div>
 
           <div className="text-center">
             <Link 
               href="/register" 
-              className="inline-flex items-center justify-center w-full py-3 px-4 border-2 border-indigo-600 text-indigo-600 font-semibold rounded-xl hover:bg-indigo-50 transition-all"
+              className="inline-flex items-center justify-center w-full py-3 px-4 border-2 border-cyan-500 text-cyan-300 font-semibold rounded-xl hover:bg-cyan-500/10 transition-all"
             >
               Create an account
             </Link>

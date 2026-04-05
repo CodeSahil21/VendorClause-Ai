@@ -18,8 +18,15 @@ export default function ChatDocument({ sessionId, fileName, fileUrl }: ChatDocum
   const [isLoading, setIsLoading] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const streamingTextRef = useRef('');
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const { socket } = useSocket();
   const pdfUrl = fileUrl || '';
+
+  const scrollToLatest = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+  };
 
   // Load chat history on mount
   useEffect(() => {
@@ -83,6 +90,10 @@ export default function ChatDocument({ sessionId, fileName, fileUrl }: ChatDocum
     };
   }, [sessionId, socket]);
 
+  useEffect(() => {
+    scrollToLatest();
+  }, [messages, streamingText, isLoading]);
+
   const handleSendMessage = async () => {
     if (!input.trim()) return;
 
@@ -106,43 +117,45 @@ export default function ChatDocument({ sessionId, fileName, fileUrl }: ChatDocum
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Chat with Document</h1>
-        <p className="text-gray-600 mt-1">Document: {fileName}</p>
+      <div className="mb-6 rounded-2xl border border-cyan-500/25 bg-slate-950/75 px-4 py-3 shadow-lg shadow-black/20 backdrop-blur-sm">
+        <p className="text-[11px] sm:text-xs uppercase tracking-wide text-cyan-300 font-semibold">Document Workspace</p>
+        <p className="text-sm text-slate-300 mt-2 truncate">
+          <span className="font-medium text-slate-100">Document:</span> {fileName}
+        </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-6 h-[calc(100vh-200px)]">
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 h-auto xl:h-[calc(100vh-200px)]">
         {/* PDF Viewer */}
-        <div className="border border-gray-200 rounded-lg overflow-hidden flex flex-col bg-gray-50">
+        <div className="xl:col-span-5 border border-slate-700 rounded-2xl overflow-hidden flex flex-col bg-slate-900/80 shadow-xl shadow-black/20 min-h-105">
           {/* PDF Toolbar */}
-          <div className="bg-white border-b border-gray-200 p-4 flex items-center justify-between">
+          <div className="bg-slate-950/90 border-b border-slate-700 p-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <FileText className="h-5 w-5 text-indigo-600" />
-              <span className="font-medium text-gray-900 truncate text-sm">{fileName}</span>
+              <FileText className="h-5 w-5 text-cyan-300" />
+              <span className="font-medium text-slate-100 truncate text-sm">{fileName}</span>
             </div>
             <div className="flex gap-2">
               <a
                 href={pdfUrl}
                 download={fileName}
-                className="p-2 hover:bg-gray-100 rounded transition-colors"
+                className="p-2 hover:bg-slate-800 rounded transition-colors"
                 title="Download PDF"
               >
-                <Download className="h-4 w-4 text-gray-600" />
+                <Download className="h-4 w-4 text-slate-300" />
               </a>
               <a
                 href={pdfUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="p-2 hover:bg-gray-100 rounded transition-colors"
+                className="p-2 hover:bg-slate-800 rounded transition-colors"
                 title="Open in new tab"
               >
-                <ExternalLink className="h-4 w-4 text-gray-600" />
+                <ExternalLink className="h-4 w-4 text-slate-300" />
               </a>
             </div>
           </div>
 
           {/* PDF Content - Using embed for better compatibility */}
-          <div className="flex-1 overflow-auto bg-gray-100">
+          <div className="flex-1 overflow-auto bg-slate-950">
             {pdfUrl ? (
               <embed
                 src={pdfUrl}
@@ -151,7 +164,7 @@ export default function ChatDocument({ sessionId, fileName, fileUrl }: ChatDocum
                 title="Document Preview"
               />
             ) : (
-              <div className="flex items-center justify-center h-full text-gray-500">
+              <div className="flex items-center justify-center h-full text-slate-400 text-sm">
                 No PDF URL available
               </div>
             )}
@@ -159,19 +172,23 @@ export default function ChatDocument({ sessionId, fileName, fileUrl }: ChatDocum
         </div>
 
         {/* Chat Interface */}
-        <div className="border border-gray-200 rounded-lg overflow-hidden flex flex-col bg-white">
-          <div className="bg-white border-b border-gray-200 p-4">
-            <h3 className="font-semibold text-gray-900">Ask Questions</h3>
-            <p className="text-xs text-gray-500 mt-1">Query your document using natural language</p>
+        <div className="xl:col-span-7 border border-slate-700 rounded-2xl overflow-hidden flex flex-col bg-slate-900/80 shadow-xl shadow-black/20 min-h-105">
+          <div className="bg-slate-950/90 border-b border-slate-700 p-4">
+            <h3 className="font-semibold text-slate-100">Ask Questions</h3>
+            <p className="text-xs text-slate-400 mt-1">Your legal assistant for clause review, risk spotting, obligations, and negotiation guidance</p>
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-auto p-4 space-y-4">
+          <div
+            ref={messagesContainerRef}
+            className="flex-1 overflow-auto no-scrollbar p-4 space-y-4 bg-linear-to-b from-slate-900/60 to-slate-950/80"
+            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          >
             {messages.length === 0 ? (
               <div className="flex items-center justify-center h-full text-center">
                 <div>
-                  <p className="text-gray-500">No messages yet</p>
-                  <p className="text-xs text-gray-400 mt-1">Ask a question about the document</p>
+                  <p className="text-slate-400">No messages yet</p>
+                  <p className="text-xs text-slate-500 mt-1">Ask a question about the document</p>
                 </div>
               </div>
             ) : (
@@ -183,13 +200,11 @@ export default function ChatDocument({ sessionId, fileName, fileUrl }: ChatDocum
                   <div
                     className={`max-w-[80%] px-4 py-2 rounded-lg ${
                       msg.role === 'user'
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-gray-100 text-gray-900'
+                        ? 'bg-linear-to-r from-cyan-500 to-blue-600 text-white'
+                        : 'bg-slate-800 text-slate-100 border border-slate-700'
                     }`}
                   >
-                    <div className={`text-sm prose prose-sm max-w-none ${
-                      msg.role === 'user' ? 'prose-invert' : ''
-                    }`}>
+                    <div className="text-sm prose prose-sm prose-invert max-w-none">
                       <ReactMarkdown>{msg.content}</ReactMarkdown>
                     </div>
                   </div>
@@ -198,16 +213,16 @@ export default function ChatDocument({ sessionId, fileName, fileUrl }: ChatDocum
             )}
             {isLoading && (
               <div className="flex justify-start">
-                <div className="bg-gray-100 text-gray-900 px-4 py-2 rounded-lg">
+                <div className="bg-slate-800 text-slate-100 px-4 py-2 rounded-lg border border-slate-700">
                   {streamingText ? (
-                    <div className="text-sm prose prose-sm max-w-none">
+                    <div className="text-sm prose prose-sm prose-invert max-w-none">
                       <ReactMarkdown>{streamingText}</ReactMarkdown>
                     </div>
                   ) : (
                     <div className="flex gap-1">
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                      <div className="w-2 h-2 bg-cyan-300 rounded-full animate-bounce" />
+                      <div className="w-2 h-2 bg-cyan-300 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+                      <div className="w-2 h-2 bg-cyan-300 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
                     </div>
                   )}
                 </div>
@@ -216,7 +231,7 @@ export default function ChatDocument({ sessionId, fileName, fileUrl }: ChatDocum
           </div>
 
           {/* Input */}
-          <div className="border-t border-gray-200 p-4">
+          <div className="border-t border-slate-700 p-4 bg-slate-950/80">
             <div className="flex gap-2">
               <input
                 type="text"
@@ -224,13 +239,13 @@ export default function ChatDocument({ sessionId, fileName, fileUrl }: ChatDocum
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
                 placeholder="Ask a question..."
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="flex-1 px-3 py-2 border border-slate-600 bg-slate-900 text-slate-100! placeholder-slate-400! rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
                 disabled={isLoading}
               />
               <button
                 onClick={handleSendMessage}
                 disabled={isLoading || !input.trim()}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="px-4 py-2 bg-linear-to-r from-cyan-500 to-blue-600 text-white rounded-lg hover:from-cyan-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 <Send className="h-4 w-4" />
               </button>

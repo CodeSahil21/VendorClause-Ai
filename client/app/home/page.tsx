@@ -51,76 +51,81 @@ export default function Home() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-8 space-y-4 sm:space-y-0">
-        <div>
-          <h2 className="text-4xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">Your Sessions</h2>
-          <p className="mt-2 text-gray-600 flex items-center">
-            <svg className="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            Manage your document analysis sessions
-          </p>
-        </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-xl hover:from-indigo-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all shadow-lg hover:shadow-xl flex items-center space-x-2 transform hover:-translate-y-0.5"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-          </svg>
-          <span>New Session</span>
-        </button>
-      </div>
+    <div className="relative overflow-hidden">
+      <div className="pointer-events-none absolute -left-24 top-10 h-72 w-72 rounded-full bg-cyan-300/30 blur-3xl" />
+      <div className="pointer-events-none absolute -right-20 top-24 h-80 w-80 rounded-full bg-blue-300/35 blur-3xl" />
 
-      {/* Stats Bar */}
-      {sessions.length > 0 && (
-        <div className="mb-8 p-4 bg-gradient-to-r from-indigo-50 via-purple-50 to-pink-50 rounded-xl border border-indigo-100">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10">
+        {/* Header */}
+        <section className="mb-8 rounded-3xl border border-cyan-100/80 bg-slate-950/90 p-5 sm:p-7 shadow-xl shadow-slate-900/20 backdrop-blur-sm">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <div className="inline-flex items-center rounded-full border border-cyan-400/40 bg-cyan-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-cyan-300">
+                Workspace Overview
+              </div>
+              <h2 className="mt-3 text-3xl sm:text-4xl font-black tracking-tight text-slate-100">Your Sessions</h2>
+              <p className="mt-2 text-slate-300 flex items-center">
+                <svg className="w-5 h-5 mr-2 text-cyan-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-              </div>
-              <div>
-                <p className="text-sm text-gray-600">Total Sessions</p>
-                <p className="text-2xl font-bold text-gray-900">{pagination?.total || sessions.length}</p>
-              </div>
+                Manage your document analysis sessions in one place
+              </p>
             </div>
-            <div className="text-right">
-              <p className="text-sm text-gray-600">Active Now</p>
-              <p className="text-lg font-semibold text-indigo-600">{sessions.length} sessions</p>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* Content */}
-      {sessions.length === 0 ? (
-        <EmptyState onCreateSession={() => setShowModal(true)} />
-      ) : (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {sessions.map((session) => (
-              <SessionCard
-                key={session.id}
-                session={session}
-                onDelete={handleDeleteClick}
-                onClick={handleSessionClick}
-              />
-            ))}
+            <button
+              onClick={() => setShowModal(true)}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-linear-to-r from-cyan-500 to-blue-600 px-6 py-3 font-semibold text-white transition-all duration-300 hover:-translate-y-0.5 hover:from-cyan-600 hover:to-blue-700 hover:shadow-lg hover:shadow-cyan-500/20 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 focus:ring-offset-slate-950"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+              </svg>
+              <span>New Session</span>
+            </button>
           </div>
-          {pagination && (
-            <Pagination
-              currentPage={pagination.page}
-              totalPages={pagination.totalPages}
-              onPageChange={getUserSessions}
-            />
-          )}
-        </>
-      )}
+
+        </section>
+
+        {/* Content */}
+        {sessions.length === 0 ? (
+          <EmptyState onCreateSession={() => setShowModal(true)} />
+        ) : (
+          <>
+            <section className="rounded-3xl border border-cyan-100/80 bg-slate-900/65 p-4 sm:p-6 shadow-lg shadow-slate-900/15 backdrop-blur-sm">
+              <div className="mb-5 flex items-center justify-between">
+                <h3 className="text-lg sm:text-xl font-bold text-slate-100">Recent Sessions</h3>
+                <span className="rounded-full bg-slate-800 px-3 py-1 text-xs sm:text-sm font-medium text-slate-300 border border-slate-700">
+                  {sessions.length} visible
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {sessions.map((session, index) => (
+                  <div
+                    key={session.id}
+                    className="animate-fadeIn"
+                    style={{ animationDelay: `${index * 70}ms`, animationFillMode: 'both' }}
+                  >
+                    <SessionCard
+                      session={session}
+                      onDelete={handleDeleteClick}
+                      onClick={handleSessionClick}
+                    />
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {pagination && (
+              <Pagination
+                currentPage={pagination.page}
+                totalPages={pagination.totalPages}
+                onPageChange={getUserSessions}
+              />
+            )}
+          </>
+        )}
+
+      </div>
 
       {/* Create Session Modal */}
       <CreateSessionModal

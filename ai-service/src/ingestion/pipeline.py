@@ -33,7 +33,7 @@ class LegalRAGIngestion:
     def __init__(self):
         self.progress = ProgressTracker()
 
-        max_concurrency = int(os.getenv("MAX_GRAPH_CONCURRENCY", "15"))
+        max_concurrency = int(os.getenv("MAX_GRAPH_CONCURRENCY", "5"))
         self._semaphore = asyncio.Semaphore(max_concurrency)
 
         # LLM is built WITHOUT a callback here intentionally.
@@ -44,7 +44,8 @@ class LegalRAGIngestion:
             model="gpt-4o-mini",
             temperature=0,
             max_tokens=2048,
-            request_timeout=60,
+            request_timeout=120,  # Increased timeout
+            max_retries=3,  # Built-in OpenAI client retries
             api_key=settings.openai_api_key,
         )
 

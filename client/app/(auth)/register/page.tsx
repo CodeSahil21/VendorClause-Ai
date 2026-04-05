@@ -59,7 +59,7 @@ export default function RegisterPage() {
   return (
     <div className="min-h-screen flex animate-fadeIn">
       {/* Left Side - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-purple-600 via-pink-500 to-rose-500 p-12 flex-col justify-between relative overflow-hidden">
+      <div className="hidden lg:flex lg:w-1/2 bg-linear-to-br from-slate-950 via-blue-900 to-cyan-900 p-12 flex-col justify-between relative overflow-hidden border-r border-cyan-800/40">
         <div className="absolute inset-0 bg-black/10"></div>
         <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2"></div>
         <div className="absolute bottom-0 left-0 w-96 h-96 bg-white/10 rounded-full translate-y-1/2 -translate-x-1/2"></div>
@@ -73,29 +73,29 @@ export default function RegisterPage() {
             <span className="text-3xl font-bold text-white">VendorClause AI</span>
           </div>
           <h1 className="text-5xl font-bold text-white mb-4 leading-tight">Start Your Journey</h1>
-          <p className="text-xl text-pink-100">Join thousands of businesses automating their vendor agreements</p>
+          <p className="text-xl text-cyan-100">Join thousands of businesses automating their vendor agreements</p>
         </div>
         <div className="relative z-10 space-y-6">
           <div className="flex items-start space-x-4 p-4 bg-white/10 backdrop-blur-sm rounded-xl border border-white/20 hover:bg-white/20 transition-all">
-            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
               <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
               </svg>
             </div>
             <div>
               <h3 className="text-white font-semibold text-lg mb-1">Automated Workflows</h3>
-              <p className="text-pink-100 text-sm">Streamline vendor onboarding and management processes</p>
+              <p className="text-cyan-100 text-sm">Streamline vendor onboarding and management processes</p>
             </div>
           </div>
           <div className="flex items-start space-x-4 p-4 bg-white/10 backdrop-blur-sm rounded-xl border border-white/20 hover:bg-white/20 transition-all">
-            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
               <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
               </svg>
             </div>
             <div>
               <h3 className="text-white font-semibold text-lg mb-1">Real-time Analytics</h3>
-              <p className="text-pink-100 text-sm">Track performance and compliance metrics in real-time</p>
+              <p className="text-cyan-100 text-sm">Track performance and compliance metrics in real-time</p>
             </div>
           </div>
         </div>
@@ -103,26 +103,26 @@ export default function RegisterPage() {
 
       {/* Right Side - Form */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-12">
-        <div className="w-full max-w-md space-y-8">
+        <div className="w-full max-w-md space-y-8 rounded-2xl border border-slate-700/70 bg-slate-950/65 backdrop-blur-md p-6 sm:p-8 shadow-2xl shadow-black/30">
           <div className="text-center lg:hidden">
-            <Image src="/APP.png" alt="VendorClause AI" width={60} height={60} className="mx-auto rounded-full mb-4 ring-4 ring-purple-100" />
-            <h2 className="text-3xl font-bold text-gray-900">Create account</h2>
-            <p className="mt-2 text-sm text-gray-600">Get started with VendorClause AI</p>
+            <Image src="/APP.png" alt="VendorClause AI" width={60} height={60} className="mx-auto rounded-full mb-4 ring-4 ring-cyan-400/40" />
+            <h2 className="text-3xl font-bold text-slate-100">Create account</h2>
+            <p className="mt-2 text-sm text-slate-300">Get started with VendorClause AI</p>
           </div>
           <div className="hidden lg:block">
-            <h2 className="text-4xl font-bold text-gray-900 mb-2">Create account</h2>
-            <p className="text-gray-600">Start managing your vendor agreements today</p>
+            <h2 className="text-4xl font-bold text-slate-100 mb-2">Create account</h2>
+            <p className="text-slate-300">Start managing your vendor agreements today</p>
           </div>
 
           <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
             <div className="space-y-5">
               <div>
-                <label htmlFor="name" className="block text-sm font-semibold text-gray-700 mb-2">
-                  Full Name <span className="text-gray-400 font-normal">(Optional)</span>
+                <label htmlFor="name" className="block text-sm font-semibold text-slate-200 mb-2">
+                  Full Name <span className="text-slate-400 font-normal">(Optional)</span>
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="h-5 w-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                     </svg>
                   </div>
@@ -131,18 +131,18 @@ export default function RegisterPage() {
                     type="text"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 bg-white rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all hover:border-gray-400"
+                    className="w-full pl-10 pr-4 py-3 border border-slate-500 bg-slate-100 text-slate-900! placeholder-slate-500! rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all hover:border-cyan-500/70"
                     placeholder="John Doe"
                   />
                 </div>
               </div>
               <div>
-                <label htmlFor="email" className="block text-sm font-semibold text-gray-700 mb-2">
+                <label htmlFor="email" className="block text-sm font-semibold text-slate-200 mb-2">
                   Email address
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="h-5 w-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                     </svg>
                   </div>
@@ -154,7 +154,7 @@ export default function RegisterPage() {
                       setFormData({ ...formData, email: e.target.value });
                       setErrors({ ...errors, email: '' });
                     }}
-                    className={`w-full pl-10 pr-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all ${errors.email ? 'border-red-500 bg-red-50' : 'border-gray-300 bg-white hover:border-gray-400'}`}
+                    className={`w-full pl-10 pr-4 py-3 border rounded-xl text-slate-900! placeholder-slate-500! focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all ${errors.email ? 'border-red-500 bg-red-50' : 'border-slate-500 bg-slate-100 hover:border-cyan-500/70'}`}
                     placeholder="you@example.com"
                   />
                 </div>
@@ -168,12 +168,12 @@ export default function RegisterPage() {
                 )}
               </div>
               <div>
-                <label htmlFor="password" className="block text-sm font-semibold text-gray-700 mb-2">
+                <label htmlFor="password" className="block text-sm font-semibold text-slate-200 mb-2">
                   Password
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="h-5 w-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                     </svg>
                   </div>
@@ -185,13 +185,13 @@ export default function RegisterPage() {
                       setFormData({ ...formData, password: e.target.value });
                       setErrors({ ...errors, password: '' });
                     }}
-                    className={`w-full pl-10 pr-12 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all ${errors.password ? 'border-red-500 bg-red-50' : 'border-gray-300 bg-white hover:border-gray-400'}`}
+                    className={`w-full pl-10 pr-12 py-3 border rounded-xl text-slate-900! placeholder-slate-500! focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all ${errors.password ? 'border-red-500 bg-red-50' : 'border-slate-500 bg-slate-100 hover:border-cyan-500/70'}`}
                     placeholder="••••••••"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200"
                   >
                     {showPassword ? (
                       <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -213,7 +213,7 @@ export default function RegisterPage() {
                     {errors.password}
                   </p>
                 ) : (
-                  <p className="mt-2 text-xs text-gray-500 flex items-center">
+                  <p className="mt-2 text-xs text-slate-400 flex items-center">
                     <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
@@ -226,7 +226,7 @@ export default function RegisterPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3.5 px-4 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold rounded-xl hover:from-purple-700 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+              className="w-full py-3.5 px-4 bg-linear-to-r from-cyan-500 to-blue-600 text-white font-semibold rounded-xl hover:from-cyan-600 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500 focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
             >
               {isLoading ? (
                 <span className="flex items-center justify-center">
@@ -242,17 +242,17 @@ export default function RegisterPage() {
 
           <div className="relative">
             <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-gray-300"></div>
+              <div className="w-full border-t border-slate-700"></div>
             </div>
             <div className="relative flex justify-center text-sm">
-              <span className="px-4 bg-white text-gray-500">Already have an account?</span>
+              <span className="px-4 bg-slate-950 text-slate-400">Already have an account?</span>
             </div>
           </div>
 
           <div className="text-center">
             <Link 
               href="/login" 
-              className="inline-flex items-center justify-center w-full py-3 px-4 border-2 border-purple-600 text-purple-600 font-semibold rounded-xl hover:bg-purple-50 transition-all"
+              className="inline-flex items-center justify-center w-full py-3 px-4 border-2 border-cyan-500 text-cyan-300 font-semibold rounded-xl hover:bg-cyan-500/10 transition-all"
             >
               Sign in instead
             </Link>

@@ -51,7 +51,12 @@ class GraphExtractor:
                 try:
                     return await self.graph_transformer.aconvert_to_graph_documents(batch)
                 except Exception as e:
-                    wait_time = 2 ** attempt
+                    # Check if it's a rate limit error (0005)
+                    if "rate_limit" in str(e).lower() or "0005" in str(e):
+                        wait_time = 30 + (attempt * 10)  # 30s, 40s, 50s for rate limits
+                    else:
+                        wait_time = 2 ** attempt
+                    
                     logger.warning(
                         "Graph batch failed (attempt %d/3): %s. Retrying in %ds...",
                         attempt + 1, e, wait_time,

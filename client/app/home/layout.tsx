@@ -27,33 +27,33 @@ export default function HomeLayout({ children }: { children: React.ReactNode }) 
 
   return (
     <SocketProvider>
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-indigo-50">
+      <div className="min-h-screen bg-linear-to-br from-slate-950 via-slate-900 to-blue-950">
       {/* Navbar */}
-      <nav className="bg-white/80 backdrop-blur-lg shadow-sm border-b border-gray-200/50 sticky top-0 z-50">
+      <nav className="bg-slate-950/90 backdrop-blur-lg shadow-sm border-b border-cyan-900/40 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             {/* Left - Logo */}
             <div className="flex items-center space-x-3 group cursor-pointer">
               <div className="relative">
-                <Image src="/App.png" alt="VendorClause AI" width={40} height={40} className="rounded-full ring-2 ring-indigo-100 group-hover:ring-indigo-300 transition-all" />
-                <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white animate-pulse"></div>
+                <Image src="/App.png" alt="VendorClause AI" width={40} height={40} className="rounded-full ring-2 ring-cyan-400/40 group-hover:ring-cyan-300 transition-all" />
+                <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-cyan-400 rounded-full border-2 border-slate-950 animate-pulse"></div>
               </div>
               <div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">VendorClause AI</h1>
-                <p className="text-xs text-gray-500">Contract Intelligence</p>
+                <h1 className="text-xl font-bold bg-linear-to-r from-cyan-300 to-blue-400 bg-clip-text text-transparent">VendorClause AI</h1>
+                <p className="text-xs text-slate-300">Contract Intelligence</p>
               </div>
             </div>
 
             {/* Right - User Info & Logout */}
             <div className="flex items-center space-x-4">
               {/* User Avatar */}
-              <div className="flex items-center space-x-3 px-4 py-2 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl border border-indigo-100 hover:border-indigo-200 transition-all">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-semibold text-sm shadow-md">
+              <div className="flex items-center space-x-3 px-4 py-2 bg-slate-900/80 rounded-xl border border-slate-700 hover:border-cyan-500/50 transition-all">
+                <div className="w-10 h-10 rounded-full bg-linear-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white font-semibold text-sm shadow-md">
                   {getInitials(user?.name)}
                 </div>
                 <div className="hidden sm:block">
-                  <p className="text-sm font-semibold text-gray-900">{user?.name || 'User'}</p>
-                  <p className="text-xs text-gray-500">{user?.email}</p>
+                  <p className="text-sm font-semibold text-slate-100">{user?.name || 'User'}</p>
+                  <p className="text-xs text-slate-400">{user?.email}</p>
                 </div>
               </div>
 
@@ -61,7 +61,7 @@ export default function HomeLayout({ children }: { children: React.ReactNode }) 
               <button
                 onClick={handleLogout}
                 disabled={isLoading}
-                className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-red-500 to-red-600 rounded-xl hover:from-red-600 hover:to-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center space-x-2"
+                className="px-4 py-2 text-sm font-medium text-white bg-linear-to-r from-red-500 to-red-600 rounded-xl hover:from-red-600 hover:to-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center space-x-2"
               >
                 {isLoading ? (
                   <>

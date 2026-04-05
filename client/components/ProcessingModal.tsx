@@ -37,23 +37,25 @@ export default function ProcessingModal({ jobId, onComplete, onError }: Processi
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4 shadow-xl">
+    <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className="bg-slate-950 rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl border border-slate-700">
         <div className="flex flex-col items-center">
-          <Loader2 className="h-12 w-12 text-indigo-600 animate-spin" />
-          <h2 className="mt-4 text-xl font-semibold text-gray-900">Processing Document</h2>
-          <p className="mt-2 text-center text-gray-600 text-sm">
+          <div className="h-14 w-14 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center">
+            <Loader2 className="h-8 w-8 text-cyan-300 animate-spin" />
+          </div>
+          <h2 className="mt-4 text-xl font-semibold text-slate-100">Processing Document</h2>
+          <p className="mt-2 text-center text-slate-300 text-sm">
             {getStatusMessage()}
           </p>
           <div className="mt-6 w-full">
-            <div className="w-full bg-gray-200 rounded-full h-2">
+            <div className="w-full bg-slate-800 rounded-full h-2.5 border border-slate-700">
               <div 
-                className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
+                className="bg-linear-to-r from-cyan-500 to-blue-600 h-2 rounded-full transition-all duration-300"
                 style={{ width: `${Math.max(0, Math.min(100, progress || (status === 'QUEUED' ? 5 : 0)))}%` }}
               />
             </div>
           </div>
-          <p className="mt-3 text-xs text-gray-500">
+          <p className="mt-3 text-xs text-slate-400">
             Status: {status === 'QUEUED' ? 'Queued' : 'Processing'} ({Math.max(0, Math.min(100, progress || (status === 'QUEUED' ? 5 : 0)))}%)
           </p>
         </div>
