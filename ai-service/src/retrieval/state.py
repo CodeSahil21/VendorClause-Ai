@@ -41,6 +41,7 @@ class RetrievalState(TypedDict, total=False):
     fused_chunks: list[dict]
     crag_iteration: int
     crag_status: CRAGStatusType
+    crag_gap_analysis: str
     context_sufficient: bool
 
     # Generation
