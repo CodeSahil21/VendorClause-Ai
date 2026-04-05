@@ -7,24 +7,27 @@ FastAPI app exposing two tools over SSE + HTTP:
 Standalone process listens on port 8001, streams results via SSE.
 """
 
+# Standard library
 import asyncio
-import json
 import logging
 import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+# Path bootstrap — must happen before any local imports.
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+# Third-party
 from fastembed import SparseTextEmbedding
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from langchain_huggingface import HuggingFaceEmbeddings
 from qdrant_client import AsyncQdrantClient, models
 from qdrant_client.models import Distance, VectorParams
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
+# Local
 from src.shared.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -34,15 +37,23 @@ logging.basicConfig(level=logging.INFO)
 class QdrantMCPServer:
     def __init__(self):
         self.qdrant = AsyncQdrantClient(url=settings.qdrant_url)
-        self.collection_name = "legal_contracts_hybrid"
+        self.collection_name = settings.qdrant_collection_name
+        self.embedding_model: HuggingFaceEmbeddings | None = None
+        self.sparse_model: SparseTextEmbedding | None = None
+        self._model_lock = asyncio.Lock()
 
-        self.embedding_model = HuggingFaceEmbeddings(
-            model_name="BAAI/bge-large-en-v1.5",
-            model_kwargs={"device": "cpu"},
-            encode_kwargs={"normalize_embeddings": True, "batch_size": 32},
-        )
-
-        self.sparse_model = SparseTextEmbedding(model_name="prithivida/Splade_PP_en_v1")
+    async def _ensure_models_loaded(self) -> None:
+        if self.embedding_model is not None:
+            return
+        async with self._model_lock:
+            if self.embedding_model is None:
+                self.embedding_model = HuggingFaceEmbeddings(
+                    model_name="BAAI/bge-large-en-v1.5",
+                    model_kwargs={"device": "cpu"},
+                    encode_kwargs={"normalize_embeddings": True, "batch_size": 32},
+                )
+            if self.sparse_model is None:
+                self.sparse_model = SparseTextEmbedding(model_name="prithivida/Splade_PP_en_v1")
 
     async def ensure_collection(self) -> None:
         if not await self.qdrant.collection_exists(self.collection_name):
@@ -57,7 +68,6 @@ class QdrantMCPServer:
         self,
         query_text: str,
         document_id: str,
-        clause_types: list[str] = None,
         top_k: int = 10,
         use_sparse: bool = True,
     ) -> list[dict]:
@@ -66,8 +76,7 @@ class QdrantMCPServer:
         Returns list of {chunk_id, text, score_dense, score_sparse, clause_type, importance}.
         Scores from both paths are returned separately for RRF fusion in retrieval layer.
         """
-        if clause_types is None:
-            clause_types = []
+        await self._ensure_models_loaded()
 
         logger.info(f"Searching: query={query_text[:50]}, doc={document_id}, top_k={top_k}")
 
@@ -88,33 +97,35 @@ class QdrantMCPServer:
 
         sparse_vec = sparse_result[0]
 
+        # Keep recall high in vector search: constrain by document only.
+        # Clause-type filtering is handled by metadata_filter (filter-first path).
         must_filters = [
             models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id))
         ]
-        if clause_types:
-            must_filters.append(
-                models.FieldCondition(key="clause_type", match=models.MatchAny(any=clause_types))
-            )
 
         qdrant_filter = models.Filter(must=must_filters)
         results_by_id = {}  # Track scores from both paths
 
+        sparse_query_vector = models.SparseVector(
+            indices=sparse_vec.indices.tolist(),
+            values=sparse_vec.values.tolist(),
+        )
+
         if use_sparse:
             # Parallel searches: dense + sparse simultaneously
             search_tasks = [
-                self.qdrant.search(
+                self.qdrant.query_points(
                     collection_name=self.collection_name,
-                    query_vector=("sparse", models.SparseVector(
-                        indices=sparse_vec.indices.tolist(),
-                        values=sparse_vec.values.tolist(),
-                    )),
+                    query=sparse_query_vector,
+                    using="sparse",
                     limit=top_k * 2,  # Over-fetch for RRF fusion
                     query_filter=qdrant_filter,
                     timeout=30,  # 30s timeout
                 ),
-                self.qdrant.search(
+                self.qdrant.query_points(
                     collection_name=self.collection_name,
-                    query_vector=("dense", dense_vec),
+                    query=dense_vec,
+                    using="dense",
                     limit=top_k * 2,
                     query_filter=qdrant_filter,
                     timeout=30,
@@ -122,16 +133,19 @@ class QdrantMCPServer:
             ]
 
             try:
-                sparse_results, dense_results = await asyncio.gather(*search_tasks, return_exceptions=True)
-                if isinstance(sparse_results, Exception):
-                    logger.error(f"Sparse search error: {sparse_results}")
-                    raise sparse_results
-                if isinstance(dense_results, Exception):
-                    logger.error(f"Dense search error: {dense_results}")
-                    raise dense_results
+                sparse_response, dense_response = await asyncio.gather(*search_tasks, return_exceptions=True)
+                if isinstance(sparse_response, Exception):
+                    logger.error(f"Sparse search error: {sparse_response}")
+                    raise sparse_response
+                if isinstance(dense_response, Exception):
+                    logger.error(f"Dense search error: {dense_response}")
+                    raise dense_response
             except Exception as e:
                 logger.error(f"Search error: {e}")
                 raise
+
+            sparse_results = sparse_response.points
+            dense_results = dense_response.points
 
             # Combine results: preserve both scores for RRF fusion layer
             for rank, result in enumerate(sparse_results):
@@ -168,14 +182,21 @@ class QdrantMCPServer:
                     results_by_id[cid]["score_dense"] = result.score
                     results_by_id[cid]["rank_dense"] = rank
 
-            results = list(results_by_id.values())
+            # Sort by strongest available score before truncation.
+            results = sorted(
+                results_by_id.values(),
+                key=lambda x: max(x.get("score_dense") or 0.0, x.get("score_sparse") or 0.0),
+                reverse=True,
+            )
         else:
             # Dense search only
+            results = []
             try:
                 dense_results = await asyncio.wait_for(
-                    self.qdrant.search(
+                    self.qdrant.query_points(
                         collection_name=self.collection_name,
-                        query_vector=("dense", dense_vec),
+                        query=dense_vec,
+                        using="dense",
                         limit=top_k,
                         query_filter=qdrant_filter,
                     ),
@@ -185,7 +206,7 @@ class QdrantMCPServer:
                 logger.error("Dense search timeout")
                 raise
 
-            for result in dense_results:
+            for result in dense_results.points:
                 results.append({
                     "chunk_id": result.payload.get("chunk_id"),
                     "text": result.payload.get("text"),
@@ -226,23 +247,51 @@ class QdrantMCPServer:
 
         results_list = []
         try:
-            points, _ = await self.qdrant.scroll(
-                collection_name=self.collection_name,
-                scroll_filter=models.Filter(must=must_filters),
-                limit=50,
-            )
+            offset = None
+            while True:
+                points, next_offset = await self.qdrant.scroll(
+                    collection_name=self.collection_name,
+                    scroll_filter=models.Filter(must=must_filters),
+                    limit=50,
+                    offset=offset,
+                )
 
-            for point in points:
-                results_list.append({
-                    "chunk_id": point.payload.get("chunk_id"),
-                    "text": point.payload.get("text"),
-                    "clause_type": point.payload.get("clause_type"),
-                    "importance": point.payload.get("importance"),
-                })
+                for point in points:
+                    results_list.append({
+                        "chunk_id": point.payload.get("chunk_id"),
+                        "text": point.payload.get("text"),
+                        "clause_type": point.payload.get("clause_type"),
+                        "importance": point.payload.get("importance"),
+                    })
+
+                if next_offset is None:
+                    break
+                offset = next_offset
         except Exception as e:
             logger.warning(f"Metadata filter error: {e}")
 
         return results_list
+
+    async def delete_document(self, document_id: str) -> dict:
+        """Delete all vectors for a document_id from Qdrant collection."""
+        logger.info(f"Deleting Qdrant vectors for doc={document_id}")
+
+        await self.qdrant.delete(
+            collection_name=self.collection_name,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="document_id",
+                            match=models.MatchValue(value=document_id),
+                        )
+                    ]
+                )
+            ),
+            wait=True,
+        )
+
+        return {"deleted": True, "document_id": document_id}
 
 
 # TODO: Implement real MCP-over-SSE streaming
@@ -257,17 +306,18 @@ class QdrantMCPServer:
 async def lifespan(app: FastAPI):
     logger.info("Starting Qdrant MCP Server...")
     await server.ensure_collection()
+    await server._ensure_models_loaded()
     yield
     logger.info("Shutting down Qdrant MCP Server...")
 
 
 app = FastAPI(title="Qdrant MCP Server", lifespan=lifespan)
 server = QdrantMCPServer()
+allowed_origins = [origin.strip() for origin in settings.mcp_allowed_origins.split(",") if origin.strip()]
 
-# CORS middleware — restrict to local AI service and Gateway only
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost", "http://localhost:3000"],  # Gateway/client
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
@@ -275,19 +325,17 @@ app.add_middleware(
 
 
 async def verify_auth(request: Request):
-    """Simple auth middleware: check X-API-Key header.
-    
-    In production, validate against real API key store.
-    For now, localhost can bypass; remote requests need header.
-    """
+    """Check X-API-Key header for MCP tool invocations."""
     client_host = request.client.host if request.client else "unknown"
-    if client_host not in ("127.0.0.1", "localhost"):
-        api_key = request.headers.get("X-API-Key")
-        expected_key = settings.mcp_auth_key
-        if not expected_key:
-            raise HTTPException(status_code=503, detail="MCP auth key is not configured")
-        if not api_key or api_key != expected_key:
-            raise HTTPException(status_code=403, detail="Unauthorized")
+    if settings.mcp_allow_local_bypass and client_host in ("127.0.0.1", "localhost"):
+        return
+
+    api_key = request.headers.get("X-API-Key")
+    expected_key = settings.mcp_auth_key
+    if not expected_key:
+        raise HTTPException(status_code=503, detail="MCP auth key is not configured")
+    if not api_key or api_key != expected_key:
+        raise HTTPException(status_code=403, detail="Unauthorized")
 
 
 @app.middleware("http")
@@ -303,25 +351,25 @@ async def auth_middleware(request: Request, call_next):
 
 @app.get("/sse")
 async def sse_connect():
-    async def event_stream():
-        yield "data: " + json.dumps({"type": "session_start"}) + "\n\n"
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return JSONResponse(
+        status_code=501,
+        content={"success": False, "error": "SSE is not enabled on this server. Use POST /messages."},
+    )
 
 
 @app.post("/messages")
 async def handle_messages(request: dict):
     """Handle MCP tool call requests.
 
-    Expected request format:
+        Expected request format:
     {
-      "tool": "vector_search" | "metadata_filter",
+            "tool": "vector_search" | "metadata_filter" | "delete_document",
       "params": {...}
     }
     """
     tool_name = request.get("tool")
     params = request.get("params", {})
-    results = []  # Initialize results to avoid reference before assignment*/
+    results = []
 
     if not tool_name:
         return {"success": False, "error": "Missing 'tool' field"}
@@ -333,11 +381,18 @@ async def handle_messages(request: dict):
             # Validate params
             if not params.get("query_text") or not params.get("document_id"):
                 return {"success": False, "error": "Missing required params: query_text, document_id"}
+            if "clause_types" in params:
+                logger.warning("vector_search received deprecated clause_types param; ignoring")
+                params.pop("clause_types", None)
             results = await server.vector_search(**params)
         elif tool_name == "metadata_filter":
             if not params.get("document_id"):
                 return {"success": False, "error": "Missing required param: document_id"}
             results = await server.metadata_filter(**params)
+        elif tool_name == "delete_document":
+            if not params.get("document_id"):
+                return {"success": False, "error": "Missing required param: document_id"}
+            results = await server.delete_document(**params)
         else:
             return {"success": False, "error": f"Unknown tool: {tool_name}"}
 

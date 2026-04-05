@@ -7,20 +7,23 @@ FastAPI app exposing two tools over SSE + HTTP:
 Standalone process listens on port 8002, streams results via SSE.
 """
 
+# Standard library
 import asyncio
-import json
 import logging
 import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
-
+# Path bootstrap — must happen before any local imports.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+# Third-party
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+# Local
 from src.shared.neo4j_service import Neo4jService
 from src.shared.settings import settings
 
@@ -61,34 +64,54 @@ class Neo4jMCPServer:
             async with self.neo4j.driver.session() as session:
                 normalized_names = [self.neo4j.normalize_entity(n) for n in entity_names]
 
-                cypher = f"""
-                MATCH (e:Entity {{document_id: $doc_id}})
-                WHERE e.id IN $entity_names
-                MATCH (e)-[r*1..{depth}]-(connected:Entity)
-                WHERE $rel_types = [] OR type(r[-1]) IN $rel_types
-                RETURN
-                    e.chunk_id        AS source_chunk_id,
-                    e.id              AS source_entity,
-                    type(r[-1])       AS relationship_type,
-                    connected.id      AS target_entity,
-                    connected.chunk_id AS target_chunk_id
-                LIMIT 50
-                """
+                if depth == 1:
+                    cypher = """
+                    MATCH (d:Document {id: $doc_id})-[:HAS_ENTITY]->(e:Entity)
+                    WHERE e.id IN $entity_names
+                    MATCH (e)-[r]->(connected:Entity)
+                    WHERE connected.document_id = $doc_id
+                      AND ($rel_types = [] OR type(r) IN $rel_types)
+                                        RETURN DISTINCT
+                        e.chunk_id         AS source_chunk_id,
+                        e.id               AS source_entity,
+                        type(r)            AS relationship_type,
+                        connected.id       AS target_entity,
+                        connected.chunk_id AS target_chunk_id
+                    LIMIT 50
+                    """
+                else:
+                    cypher = f"""
+                    MATCH (d:Document {{id: $doc_id}})-[:HAS_ENTITY]->(e:Entity)
+                    WHERE e.id IN $entity_names
+                    MATCH path = (e)-[*1..{depth}]-(connected:Entity)
+                                        WHERE connected.document_id = $doc_id
+                                            AND ALL(n IN nodes(path) WHERE n.document_id = $doc_id OR n = e)
+                    UNWIND relationships(path) AS r
+                                        WITH e, r, endNode(r) AS tgt
+                                        WHERE tgt.document_id = $doc_id
+                                            AND ($rel_types = [] OR type(r) IN $rel_types)
+                                        RETURN DISTINCT
+                        e.chunk_id         AS source_chunk_id,
+                        e.id               AS source_entity,
+                        type(r)            AS relationship_type,
+                                                tgt.id             AS target_entity,
+                                                tgt.chunk_id       AS target_chunk_id
+                    LIMIT 50
+                    """
 
                 try:
-                    query_result = await asyncio.wait_for(
-                        session.run(
+                    async def _run_traverse():
+                        r = await session.run(
                             cypher,
                             {
                                 "doc_id": document_id,
                                 "entity_names": normalized_names,
                                 "rel_types": relationship_types,
-                                "depth": depth,  # Now parameterized
                             },
-                        ),
-                        timeout=30,
-                    )
-                    records = await query_result.data()
+                        )
+                        return await r.data()
+
+                    records = await asyncio.wait_for(_run_traverse(), timeout=30)
                 except asyncio.TimeoutError:
                     logger.error(f"Graph traverse timeout for {entity_names}")
                     raise
@@ -128,8 +151,10 @@ class Neo4jMCPServer:
                 normalized_name = self.neo4j.normalize_entity(entity_name)
 
                 cypher = """
-                MATCH (e:Entity {id: $entity_id, document_id: $doc_id})
+                MATCH (d:Document {id: $doc_id})-[:HAS_ENTITY]->(e:Entity {id: $entity_id})
                 OPTIONAL MATCH (e)-[r]-(connected:Entity)
+                WITH e, connected
+                WHERE connected IS NULL OR connected.document_id = $doc_id
                 RETURN
                     e.type                        AS entity_type,
                     e.chunk_id                    AS chunk_id,
@@ -138,20 +163,23 @@ class Neo4jMCPServer:
                     collect(DISTINCT connected.chunk_id) AS connected_chunk_ids
                 """
 
-                query_result = await session.run(
-                    cypher,
-                    {"entity_id": normalized_name, "doc_id": document_id},
-                )
+                async def _run_extract():
+                    query_result = await session.run(
+                        cypher,
+                        {"entity_id": normalized_name, "doc_id": document_id},
+                    )
+                    return await query_result.data()
 
-                records = await query_result.data()
+                records = await asyncio.wait_for(_run_extract(), timeout=30)
 
                 for record in records:
+                    connected_ids = record.get("connected_chunk_ids", [])
                     results.append({
                         "entity_type": record.get("entity_type"),
                         "chunk_id": record.get("chunk_id"),
                         "clause_type": record.get("clause_type"),
                         "importance": record.get("importance"),
-                        "connected_chunk_ids": record.get("connected_chunk_ids", []),
+                        "connected_chunk_ids": [cid for cid in connected_ids if cid is not None],
                     })
 
                 logger.info(f"Extract entity found {len(results)} results")
@@ -160,6 +188,32 @@ class Neo4jMCPServer:
             logger.error(f"Extract entity error: {e}")
 
         return results
+
+    async def delete_document_graph(self, document_id: str) -> dict:
+        """Delete document node and all document-scoped entities/relationships."""
+        logger.info(f"Deleting Neo4j graph for doc={document_id}")
+
+        async with self.neo4j.driver.session() as session:
+            # Delete document and linked entities first.
+            await session.run(
+                """
+                MATCH (d:Document {id: $doc_id})
+                OPTIONAL MATCH (d)-[:HAS_ENTITY]->(e:Entity)
+                DETACH DELETE d, e
+                """,
+                {"doc_id": document_id},
+            )
+
+            # Defensive cleanup for any remaining document-scoped entities.
+            await session.run(
+                """
+                MATCH (e:Entity {document_id: $doc_id})
+                DETACH DELETE e
+                """,
+                {"doc_id": document_id},
+            )
+
+        return {"deleted": True, "document_id": document_id}
 
 
 @asynccontextmanager
@@ -173,11 +227,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Neo4j MCP Server", lifespan=lifespan)
 server = Neo4jMCPServer()
+allowed_origins = [origin.strip() for origin in settings.mcp_allowed_origins.split(",") if origin.strip()]
 
-# CORS middleware — restrict to local AI service and Gateway only
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost", "http://localhost:3000"],  # Gateway/client
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
@@ -185,19 +239,17 @@ app.add_middleware(
 
 
 async def verify_auth(request: Request):
-    """Simple auth middleware: check X-API-Key header.
-    
-    In production, validate against real API key store.
-    For now, localhost can bypass; remote requests need header.
-    """
+    """Check X-API-Key header for MCP tool invocations."""
     client_host = request.client.host if request.client else "unknown"
-    if client_host not in ("127.0.0.1", "localhost"):
-        api_key = request.headers.get("X-API-Key")
-        expected_key = settings.mcp_auth_key
-        if not expected_key:
-            raise HTTPException(status_code=503, detail="MCP auth key is not configured")
-        if not api_key or api_key != expected_key:
-            raise HTTPException(status_code=403, detail="Unauthorized")
+    if settings.mcp_allow_local_bypass and client_host in ("127.0.0.1", "localhost"):
+        return
+
+    api_key = request.headers.get("X-API-Key")
+    expected_key = settings.mcp_auth_key
+    if not expected_key:
+        raise HTTPException(status_code=503, detail="MCP auth key is not configured")
+    if not api_key or api_key != expected_key:
+        raise HTTPException(status_code=403, detail="Unauthorized")
 
 
 @app.middleware("http")
@@ -213,19 +265,19 @@ async def auth_middleware(request: Request, call_next):
 
 @app.get("/sse")
 async def sse_connect():
-    async def event_stream():
-        yield "data: " + json.dumps({"type": "session_start"}) + "\n\n"
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return JSONResponse(
+        status_code=501,
+        content={"success": False, "error": "SSE is not enabled on this server. Use POST /messages."},
+    )
 
 
 @app.post("/messages")
 async def handle_messages(request: dict):
     """Handle MCP tool call requests.
 
-    Expected request format:
+        Expected request format:
     {
-      "tool": "graph_traverse" | "extract_entity",
+            "tool": "graph_traverse" | "extract_entity" | "delete_document_graph",
       "params": {...}
     }
     """
@@ -246,6 +298,10 @@ async def handle_messages(request: dict):
             if not params.get("entity_name") or not params.get("document_id"):
                 return {"success": False, "error": "Missing required params: entity_name, document_id"}
             results = await server.extract_entity(**params)
+        elif tool_name == "delete_document_graph":
+            if not params.get("document_id"):
+                return {"success": False, "error": "Missing required param: document_id"}
+            results = await server.delete_document_graph(**params)
         else:
             return {"success": False, "error": f"Unknown tool: {tool_name}"}
 
