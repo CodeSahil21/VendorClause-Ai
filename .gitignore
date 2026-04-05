@@ -62,6 +62,5 @@ coverage/
 Gateway/prisma/migrations/
 
 # Documentation and config (EXCLUDE from git)
-*.md
 *.yml
 *.yaml
