@@ -6,6 +6,7 @@ import re
 from neo4j import AsyncGraphDatabase
 
 # Local
+from src.ingestion.constants import ENTITY_ALIASES
 from src.shared.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -24,23 +25,12 @@ ALLOWED_REL_TYPES = {
     "APPLIES_TO",
 }
 
-ENTITY_ALIASES = {
-    "service provider": "provider",
-    "vendor": "provider",
-    "supplier": "provider",
-    "client": "customer",
-    "customer": "customer",
-    "buyer": "customer",
-    "purchaser": "customer",
-    "company": "company",
-}
-
-
 class Neo4jService:
     def __init__(self):
         self.driver = AsyncGraphDatabase.driver(
             settings.neo4j_uri,
             auth=(settings.neo4j_user, settings.neo4j_password),
+            notifications_min_severity="WARNING",
         )
         self._indexes_created = False
 
@@ -56,6 +46,7 @@ class Neo4jService:
             return
         async with self.driver.session() as session:
             await session.run("CREATE INDEX entity_id IF NOT EXISTS FOR (n:Entity) ON (n.id);")
+            await session.run("CREATE INDEX entity_id_doc IF NOT EXISTS FOR (n:Entity) ON (n.id, n.document_id);")
             await session.run("CREATE INDEX document_id IF NOT EXISTS FOR (d:Document) ON (d.id);")
             await session.run("CREATE INDEX chunk_id IF NOT EXISTS FOR (n:Entity) ON (n.chunk_id);")
         self._indexes_created = True
@@ -91,7 +82,7 @@ class Neo4jService:
                         "type": node.type,
                         "confidence": 0.8,
                         "chunk_id": props.get("chunk_id"),
-                        "document_id": props.get("document_id"),
+                        "document_id": props.get("document_id") or document_id,
                         "clause_type": props.get("clause_type"),
                         "importance": props.get("importance"),
                     }
@@ -123,7 +114,7 @@ class Neo4jService:
                 await session.run(
                     """
                     UNWIND $rows AS row
-                    MERGE (n:Entity {id: row.id})
+                    MERGE (n:Entity {id: row.id, document_id: row.document_id})
                     SET n.type = coalesce(n.type, row.type),
                         n.confidence = coalesce(n.confidence, row.confidence),
                         n.chunk_id = coalesce(row.chunk_id, n.chunk_id),
@@ -142,8 +133,8 @@ class Neo4jService:
                 await session.run(
                     f"""
                     UNWIND $rows AS row
-                    MATCH (s:Entity {{id: row.source}})
-                    MATCH (t:Entity {{id: row.target}})
+                    MATCH (s:Entity {{id: row.source, document_id: row.document_id}})
+                    MATCH (t:Entity {{id: row.target, document_id: row.document_id}})
                     MATCH (d:Document {{id: row.document_id}})
                     WITH s, t, d, row
                     WHERE s IS NOT NULL AND t IS NOT NULL

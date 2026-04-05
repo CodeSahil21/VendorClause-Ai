@@ -43,7 +43,7 @@ class LegalRAGIngestion:
         self.llm = ChatOpenAI(
             model="gpt-4o-mini",
             temperature=0,
-            max_tokens=1000,
+            max_tokens=2048,
             request_timeout=60,
             api_key=settings.openai_api_key,
         )
@@ -173,8 +173,8 @@ class LegalRAGIngestion:
 
         t0 = time.time()
         graph_docs, _ = await asyncio.gather(
-            asyncio.create_task(self.extract_graph(high_value_chunks)),
-            asyncio.create_task(self._vector_indexer._index_chunks(chunks)),
+            self.extract_graph(high_value_chunks),
+            self._vector_indexer._index_chunks(chunks),
         )
         parallel_time = time.time() - t0
         update_trace({

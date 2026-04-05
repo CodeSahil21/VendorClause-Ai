@@ -27,8 +27,10 @@ class VectorIndexer:
             batch = chunks[i:i + batch_size]
             texts = [c.page_content for c in batch]
 
-            dense = await asyncio.to_thread(self.embedding_model.embed_documents, texts)
-            sparse = await asyncio.to_thread(lambda t=texts: list(self.sparse_model.embed(t)))
+            dense, sparse = await asyncio.gather(
+                asyncio.to_thread(self.embedding_model.embed_documents, texts),
+                asyncio.to_thread(lambda t=texts: list(self.sparse_model.embed(t))),
+            )
 
             points = []
             for j, chunk in enumerate(batch):
