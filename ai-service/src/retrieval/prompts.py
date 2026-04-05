@@ -18,13 +18,24 @@ Decision Rules:
 - graph_only: relationships between entities (e.g., "who owes what")
 - hybrid: conflict, interpretation, multi-clause analysis
 - vector_only: semantic search or general queries
+- NEVER choose graph_only unless entities list is non-empty and query is explicitly relational
+- If entities list would be empty, use vector_only or hybrid
 
 Few-shot Example:
 Q: "Does Section 4 conflict with liability cap?"
 A: {{"intent":"comparison","jurisdiction":"unknown","clause_types":["Liability"],"entities":["section 4","liability cap"],"strategy":"hybrid","reasoning":"Conflict analysis requires comparing specific clauses"}}
 
+Q: "What must the vendor do with confidential information after termination?"
+A: {{"intent":"obligation","jurisdiction":"unknown","clause_types":["Confidentiality","Termination"],"entities":["vendor","confidential information","termination"],"strategy":"hybrid","reasoning":"Specific duties need clause retrieval and relation context"}}
+
+Q: "What are the main liability risks for customer under this agreement?"
+A: {{"intent":"risk","jurisdiction":"unknown","clause_types":["Liability","Indemnification","Insurance"],"entities":["customer"],"strategy":"hybrid","reasoning":"Risk requires cross-clause synthesis and exceptions"}}
+
+Q: "What insurance policies must the vendor maintain?"
+A: {{"intent":"obligation","jurisdiction":"unknown","clause_types":["Insurance"],"entities":["vendor","exhibit d","insurance requirements"],"strategy":"hybrid","reasoning":"Insurance obligations span Section 10 and Exhibit D"}}
+
 Constraints:
-- Use {{mem0_context}} to resolve entity references only
+- Use mem0_context to resolve entity references only
 - Do NOT infer missing legal facts
 - Keep reasoning under 15 words
 - If uncertain → default to hybrid (safer)
@@ -42,12 +53,18 @@ REWRITER_PROMPT = """Rewrite for high-recall legal retrieval.
 Rules:
 1. Replace pronouns using chat history
 2. Normalize citations (e.g. Section 11 → Section 11 of Act)
-3. Add legal synonyms (termination → rescission, repudiation)
+3. Add legal synonyms only when intent is comparison or risk
+  and the query is about legal meaning/conflict
+  (e.g. termination → rescission, repudiation; liability → indemnification, damages)
+  Never add rescission/repudiation for factual, procedural, or obligation queries
+  (e.g. notice period, actions upon termination, transition steps)
 4. Preserve jurisdiction and constraints
 5. Keep concise but complete
+{gap_focus}
 
 Output: single rewritten query only
 
+Intent: {intent}
 History: {chat_history}
 Original: {question}
 """
@@ -64,6 +81,9 @@ Rules:
 - Each query independently answerable
 - Include party-specific obligations if present
 - Max 5 queries
+- If one retrieval query can answer the question, output exactly 1 query
+- For insurance questions (policies, limits, coverage, minimum amounts), output at least 2 queries:
+  one for general insurance requirements and one explicitly targeting Exhibit D coverage amounts/limits
 - Output STRICT JSON array of plain strings only — no objects, no keys
 
 Example output: ["query one", "query two", "query three"]
@@ -75,17 +95,18 @@ Question: {question}
 CRAG_EVALUATOR_PROMPT = """Evaluate retrieval sufficiency strictly.
 
 Return JSON:
-{
+{{
   "status": "sufficient|partial|insufficient",
   "gap_analysis": "missing legal element if applicable",
   "confidence_score": 0.0
-}
+}}
 
 Rules:
 - "partial" if specific clause missing
 - "insufficient" if core legal basis missing
 - Do NOT assume missing info
-- Default to insufficient if uncertain
+- Default to partial if uncertain
+- Only retry retrieval on insufficient; partial may proceed to generation
 
 Query: {question}
 Context: {context}
@@ -97,19 +118,29 @@ GENERATOR_PROMPT = """You are a Legal Associate.
 Answer ONLY using provided context.
 
 Rules:
-1. Every claim MUST include [chunk_id]
+1. Every claim MUST include a numbered citation like [1], [2] matching the context sources
+  When context includes a clause/section label, include it in citation text (e.g., [1, Section 3.3])
 2. If info missing → say: "The provided documents do not specify [X]"
 3. Do NOT infer, assume, or generalize beyond context
 4. Prefer specific clauses over general statements
 5. Keep answer precise and structured
 6. If core answer unsupported → refuse entire answer
    If minor detail unsupported → omit that part only
-7. Max 150 words
+7. Max 250 words. For simple factual answers, stay concise; for multi-part obligations/comparisons, list all items.
+8. NEVER include raw document IDs, hash strings, or chunk identifiers in your answer
+9. Do NOT greet the user, use their name, or include any personal acknowledgement — answer the legal question directly
+10. If a required value appears as a placeholder, blank exhibit field, or unfilled template entry,
+    explicitly state the document does not provide that specific information
 
 If insufficient context:
 → Respond: "Insufficient information in provided documents."
 
 Output: Clear, structured legal answer with citations only.
+
+Routing intent: {intent}
+Jurisdiction hint: {jurisdiction}
+CRAG status: {crag_status}
+{mem0_block}
 
 Question: {question}
 Context: {context}
@@ -121,90 +152,24 @@ Answer:
 HALLUCINATION_CHECKER_PROMPT = """Audit answer grounding strictly.
 
 Return JSON:
-{
+{{
   "is_faithful": true/false,
   "unsupported_claims": [],
   "contradictions": [],
   "citation_check": "valid|invalid|partial",
   "action": "accept|reject|revise"
-}
+}}
 
 Rules:
 - Flag any claim not in context
 - Check logical reversals (unless/not)
-- Verify all chunk_ids exist and are accurate
+- Verify that numbered citations [1], [2], etc. correspond to claims supported by provided context
+- If an answer only describes where a value might appear (e.g., "see Exhibit" or "template field")
+  instead of providing the requested value, mark unfaithful unless context explicitly states the value is blank/missing
 - Default to false if uncertain
 - reject if major unsupported claims found
 - revise if minor issues fixable
 - accept only if fully faithful
-
-Query: {question}
-Context: {context}
-Answer: {answer}
-"""
-
-
-CYPHER_GENERATION_PROMPT = """Generate optimized Neo4j Cypher for relationship queries.
-
-Graph Schema:
-- Node: Entity (id, type, document_id, chunk_id)
-  Types: Party, Clause, Obligation, Right, Payment, Service
-- Relationship: RELATES (type, document_id)
-  Types: HAS_CLAUSE, OWES_OBLIGATION, LIMITS_LIABILITY, TERMINATES, PAYS, PROVIDES_SERVICE
-
-Rules:
-- Always MATCH, never CREATE/DELETE
-- Filter by document_id = {document_id}
-- Return chunk_ids for bridge layer
-- Limit 20
-- Use ONLY schema-defined nodes and relationships
-- If query cannot be mapped to schema → return empty
-
-Question: {question}
-Document: {document_id}
-
-Cypher:
-"""
-
-
-RESPONSE_GENERATION_PROMPT = """Answer using context only. Refusal behavior critical.
-
-Rules:
-1. Every claim must have [chunk_id]
-2. Missing info → "The documents do not specify [X]"
-3. No inference, assumption, or generalization
-4. Prioritize specific clauses over general rules
-5. Structure with bullet points for clarity
-6. Max 150 words
-7. If core answer unsupported → refuse entirely
-   If minor detail unsupported → omit that part
-
-If context insufficient:
-→ "Insufficient information in provided documents."
-
-Output: Clear, structured legal answer with citations only.
-
-Question: {question}
-Context: {context}
-
-Answer:
-"""
-
-
-HALLUCINATION_GRADE_PROMPT = """Grade answer faithfulness aggressively.
-
-Return JSON:
-{
-  \"is_faithful\": true/false,
-  \"confidence\": 0.0-1.0,
-  \"issues\": [\"unsupported claim\", ...]
-}
-
-Check for:
-- Claims not in context
-- Misquoted values/dates
-- Wrong party attribution
-- Invented references
 
 Query: {question}
 Context: {context}
@@ -227,13 +192,3 @@ Query: {question}
 
 Corrected:
 """
-
-
-# Compatibility aliases for older naming.
-RETRIEVAL_ANALYSIS_PROMPT = SUPERVISOR_PROMPT
-RETRIEVAL_REWRITE_PROMPT = REWRITER_PROMPT
-RETRIEVAL_DECOMPOSITION_PROMPT = DECOMPOSER_PROMPT
-
-QUERY_ANALYSIS_PROMPT = SUPERVISOR_PROMPT
-QUERY_REWRITE_PROMPT = REWRITER_PROMPT
-QUERY_DECOMPOSITION_PROMPT = DECOMPOSER_PROMPT
